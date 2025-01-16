@@ -36,12 +36,6 @@ import os
 
 # general constants:
 VERSION_NUMBER = 1
-IP_ADDRESS = '127.0.0.1'
-
-# port number constants:
-MIN_PORT_NUMBER = 0
-MAX_PORT_NUMBER = 65535
-PORT_FILE_NAME = "myport.info"
 
 
 class MessageType(Enum):
@@ -201,8 +195,8 @@ class MessageParser:
 
 
 class Request:
-    def __init__(self, request_binary):
-        self.request = request_binary
+    def __init__(self, request_bytes):
+        self.request = request_bytes
         self.client_id = None
         self.client_version = None
         self.request_code = None
@@ -484,13 +478,48 @@ class Database:
 
 
 class ClientManager:
-    def __init__(self, request_bytes, database):
-        self.request_bytes = request_bytes
-        self.request = Request(self.request_bytes)
+
+    BUFFER_SIZE = 4096
+
+    def __init__(self, socket, database):
+        #self.request_bytes = request_bytes
+        self.socket = socket
+        self.request = None
+        self.buffer = b""
         self.db = database
-        self.client_id = self.request.client_id
-        self.username = None
-        self.last_active_time = None
+        self.client_id = None
+        #self.username = None
+        #self.last_active_time = None
+        self.receive_and_process_request()
+
+    def receive_and_process_request(self):
+        """
+        Receive data from the socket and process it into a Request object.
+        """
+        try:
+            while True:
+                # Receive data from the socket
+                chunk = self.socket.recv(self.BUFFER_SIZE)
+                if not chunk:
+                    # Client disconnected
+                    print("Client disconnected.")
+                    return False
+
+                # Accumulate the chunk into the buffer
+                self.buffer += chunk
+
+                # Create and parse the Request object
+                self.request = Request(self.buffer)
+                self.client_id = self.request.client_id
+                #self.username = self.request.client_name
+                #self.last_active_time = self.request.last_seen
+                print(f"Processed request: {self.request}")
+                self.buffer = b""  # Clear the buffer for the next request
+                return
+        except socket.error as e:
+            print(f"Socket error: {e}")
+            return
+
 
     def handle_request(self):
         request_code = self.request.request_code
@@ -535,120 +564,107 @@ class ClientManager:
         return datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # ISO 8601 format
 
 
-class PortFileProcessor:
+class Server:
     """
-    A class to validate and process the .info files that the client uses to communicate with the server.
+    A modular server class that handles multiple client connections using selectors.
+    Includes:
+    - Non-blocking socket handling
+    - Client message handled by ClientManager
     """
 
+    MAX_CONNECTIONS = 100
+
+    # port number constants:
+    MIN_PORT_NUMBER = 0
+    MAX_PORT_NUMBER = 65535
     DEFAULT_PORT_NUMBER = 1357
+    PORT_FILE_NAME = "myport.info"
 
-    def __init__(self, port_file_name=PORT_FILE_NAME):
-        self.port_file_name = port_file_name  # "myport.info"
-        self.port = None
+    IP_ADDRESS = '127.0.0.1'
 
-    def read_file(self, filename) -> str:
-        """Reads a file and returns its content."""
+    def __init__(self):
+        self.host = self.IP_ADDRESS
+        self.port = self.read_port()
+        self.sel = selectors.DefaultSelector()
+        self.running = True
+        self.db = Database()  # Replace with your actual DB manager
+        self.sock = None
+
+    def read_port(self) -> int:
+        """Reads the server port from a configuration file."""
         try:
-            with open(filename, "r") as file:
-                data = file.read()
-            return data
-        except FileNotFoundError:
-            print(f"WARNING: File '{filename}' not found.")
-        except Exception as e:
-            print(f"WARNING: Failed to read '{filename}': {e}")
-        return None
-
-    def is_valid_port(self, port: int) -> bool:
-        """Checks if the port number is within the valid range."""
-        return MIN_PORT_NUMBER <= port <= MAX_PORT_NUMBER
-
-    def process_port_file(self) -> int:
-        """
-        Checks if the file exists and is valid. If valid, returns the port number.
-        Otherwise, returns the default port number and prints a warning.
-        """
-        port_file_data = self.read_file(self.port_file_name)
-        if port_file_data:
-            try:
-                port = int(port_file_data.strip())
-                if self.is_valid_port(port):
-                    self.port = port
-                    return self.port
-                else:
-                    print(f"WARNING: Port number in '{self.port_file_name}' is not valid: {port}")
-            except ValueError:
-                print(f"WARNING: File '{self.port_file_name}' contains invalid data")
-        else:
-            print(f"WARNING: Unable to process '{self.port_file_name}'")
-
-        # Fallback to default port
-        self.port = self.DEFAULT_PORT_NUMBER
-        print(f"Returning default port number: {self.port}")
-        return self.port
-
-
-def selector_server(port_number):
-    """Starts a non-blocking TCP server using selectors."""
-    sel = selectors.DefaultSelector()
-
-    server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    server_socket.bind((IP_ADDRESS, port_number))
-    server_socket.listen(5)  # TODO add a constant + how much clients do I need to accept at once?
-    server_socket.setblocking(False)  # Non-blocking mode
-    sel.register(server_socket, selectors.EVENT_READ, data=None)
-
-    db = Database()
-
-    print(f"Server running on port {port_number}...")
-
-    while True:
-        events = sel.select(timeout=None)
-        for key, mask in events:
-            if key.data is None:
-                # Handle new connections
-                client_socket, client_address = key.fileobj.accept()
-                print(f"New connection from {client_address}")
-                client_socket.setblocking(False)
-                sel.register(client_socket, selectors.EVENT_READ, data=client_address)
-            else:
-                # Handle client messages
-                client_socket = key.fileobj
-                client_address = key.data
+            with open(self.PORT_FILE_NAME, mode="r", encoding="utf-8") as port_file:
+                port_data = port_file.read().strip()
                 try:
-                    # Create a buffer to store received data for this client
-                    if not hasattr(client_socket, "buffer"):
-                        client_socket.buffer = b""
-
-                    chunk = client_socket.recv(4096)  # Read a chunk of data TODO add a constant
-                    if chunk: #TODO is it while or if?????????????????????????????????????????????????????
-                        client_socket.buffer += chunk  # Accumulate data
-                        print(
-                            f"Accumulating data from {client_address}: {len(client_socket.buffer)} bytes received so far.")
+                    port = int(port_data)
+                    if self.MIN_PORT_NUMBER <= port <= self.MAX_PORT_NUMBER:
+                        return port
                     else:
-                        # Connection closed by the client; process the complete data
-                        print(f"Connection closed by {client_address}.")
-                        print(f"Full message from {client_address}: {client_socket.buffer.decode('utf-8')}")
+                        print(
+                            f"WARNING: Port number in '{self.PORT_FILE_NAME}' is out of valid range ({self.MIN_PORT_NUMBER}-{self.MAX_PORT_NUMBER}): {port}")
+                except ValueError:
+                    print(f"WARNING: Port number in '{self.PORT_FILE_NAME}' is not a valid integer: {port_data}")
+        except FileNotFoundError:
+            print(f"WARNING: Port file '{self.PORT_FILE_NAME}' not found.")
+        except Exception as e:
+            print(f"WARNING: Failed to read port file '{self.PORT_FILE_NAME}': {e}")
 
-                        # Send a response
-                        response = "ACK: Server received your complete message."
-                        client_socket.send(response.encode('utf-8'))
+            # Fallback to the default port
+        print(f"Returning default port number: {self.DEFAULT_PORT_NUMBER}")
+        return self.DEFAULT_PORT_NUMBER
 
-                        # Clean up
-                        sel.unregister(client_socket)
-                        client_socket.close()
-                except Exception as e:
-                    print(f"Error handling client {client_address}: {e}")
-                    sel.unregister(client_socket)
-                    client_socket.close()
+    def _create_socket(self) -> None:
+        """Creates the main server socket and registers it with the selector."""
+        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.sock.bind((self.host, self.port))
+        self.sock.listen(Server.MAX_CONNECTIONS)
+        self.sock.setblocking(False)
+        self.sel.register(self.sock, selectors.EVENT_READ, self._accept_client)
+        print(f"Server is running on {self.host}:{self.port}")
 
+    def _accept_client(self, sock: socket.socket) -> None:
+        """Handles new client connections."""
+        try:
+            conn, addr = sock.accept()
+            conn.setblocking(False)
+            print(f"New connection from {addr}")
+
+            # Create a ClientManager for this connection
+            client = ClientManager(conn, self.db)
+
+            # Register the client socket with the selector for reading
+            self.sel.register(conn, selectors.EVENT_READ, client.handle_request())
+        except Exception as e:
+            print(f"ERROR: Failed to accept a client: {e}")
+
+    def run(self) -> None:
+        """Runs the server and processes events using the selector."""
+        self._create_socket()
+        try:
+            while self.running:
+                events = self.sel.select(timeout=None)  # Wait for events
+                for key, _ in events:
+                    callback = key.data  # The registered function (e.g., _accept_client or handle_message)
+                    callback(key.fileobj)  # Call the registered function
+        except KeyboardInterrupt:
+            print("\nServer shutting down (Ctrl+C detected).")
+        except Exception as e:
+            print(f"ERROR: Unexpected error in server loop: {e}")
+        finally:
+            self.stop()
+
+    def stop(self) -> None:
+        """Stops the server, closing all connections and the main socket."""
+        print("Stopping the server...")
+        self.running = False
+        self.sel.close()
+        if self.sock is not None:
+            self.sock.close()
 
 def main():
     """The main function, creating the user_id for the runtime requests sequence, parsing the info_files and then calls the script."""
-    port_file = PortFileProcessor(PORT_FILE_NAME)
-    port_number = port_file.process_port_file()  # process the port file and validate it, assign the required port number.
-
-    selector_server(port_number)
+    server = Server()
+    server.run()
 
 
 if __name__ == "__main__":
