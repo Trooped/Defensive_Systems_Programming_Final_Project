@@ -35,7 +35,7 @@ import os
 
 
 # general constants:
-VERSION_NUMBER = 1
+VERSION_NUMBER = 2
 
 
 class MessageType(Enum):
@@ -431,23 +431,77 @@ class Database:
         return rows[0]  # Return the first matching row
 
 
-    def insert_client(self, username: str):
+    def insert_client(self, username, public_key):
         """Insert a new client into the DB"""
         if not self.does_client_exist(username):
-            client_id = os.urandom(RequestFieldsSizes.CLIENT_ID_SIZE.value)
+            server_client_id = os.urandom(RequestFieldsSizes.CLIENT_ID_SIZE.value)
             cursor = self.connection.cursor()
             try:
                 cursor.execute(
                     f"INSERT INTO {self.CLIENTS_TABLE_NAME} (id, name, public_key, last_seen) VALUES (?, ?, ?, ?);",
-                    (client_id, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                    (server_client_id, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
                 )
                 self.connection.commit()
+                if public_key: #TODO is it right to change the public key here?
+                    self.insert_public_key(username, public_key)
+
             except Exception as e:
                 print(f"Error inserting new client into DB: {e}")
             finally:
                 cursor.close()
+                return server_client_id
         else:
             print(f"Client {username} already exists in the DB") #TODO maybe throw an error here??
+
+    def insert_public_key(self, username: str, public_key: bytes):
+        """
+        Insert or update the public key for a specific client in the database.
+        """
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                f"UPDATE {self.CLIENTS_TABLE_NAME} SET public_key = ? WHERE name = ?;",
+                (public_key, username)
+            )
+            if cursor.rowcount == 0:  # Check if the update affected any rows
+                raise ValueError(f"Client '{username}' does not exist in the database.")
+            self.connection.commit()
+            print(f"Public key updated for client '{username}'.")
+        except ValueError as e:
+            print(f"Error: {e}")
+            raise
+        except Exception as e:
+            print(f"Error updating public key for client '{username}': {e}")
+        finally:
+            cursor.close()
+
+    def fetch_all_registered_clients(self, username: str) -> list:
+        """Fetch all registered clients' usernames except the one specified."""
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(f"SELECT name FROM {self.CLIENTS_TABLE_NAME} WHERE name != ?;", username)
+            return [row[0] for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error fetching registered clients: {e}")
+            return []
+        finally:
+            cursor.close()
+
+    def update_last_seen(self, username: str):
+        """
+        Updates the last_seen field for a given username in the clients table.
+        """
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                f"UPDATE {self.CLIENTS_TABLE_NAME} SET last_seen = ? WHERE name = ?;",
+                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), username)
+            )
+            self.connection.commit()
+        except Exception as e:
+            print(f"Error updating last_seen for {username}: {e}")
+        finally:
+            cursor.close()
 
     def create_tables(self):
         try:
@@ -482,14 +536,13 @@ class ClientManager:
     BUFFER_SIZE = 4096
 
     def __init__(self, socket, database):
-        #self.request_bytes = request_bytes
         self.socket = socket
         self.request = None
         self.buffer = b""
         self.db = database
         self.client_id = None
-        #self.username = None
-        #self.last_active_time = None
+        self.username = None
+        self.last_active_time = None
         self.receive_and_process_request()
 
     def receive_and_process_request(self):
@@ -511,7 +564,7 @@ class ClientManager:
                 # Create and parse the Request object
                 self.request = Request(self.buffer)
                 self.client_id = self.request.client_id
-                #self.username = self.request.client_name
+                self.username = self.request.client_name
                 #self.last_active_time = self.request.last_seen
                 print(f"Processed request: {self.request}")
                 self.buffer = b""  # Clear the buffer for the next request
@@ -524,27 +577,39 @@ class ClientManager:
     def handle_request(self):
         request_code = self.request.request_code
 
-        #TODO after handling the request, handle the response and return it!!!
-        if request_code == RequestType.CLIENT_LIST_REQUEST.value:
-            self.client_list_request()
-        elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
-            self.incoming_messages_request()
-        elif request_code == RequestType.REGISTER_REQUEST.value:
-            self.register_request()
-        elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
-            self.public_key_other_client_request()
-        elif request_code == RequestType.SEND_MESSAGE_REQUEST.value():
-            self.send_message_request()
+        try:
+
+            self.db.update_last_seen(self.username) # Update the last seen time, because the user sent a request.
+
+            #TODO after handling the request, handle the response and return it!!!
+            if request_code == RequestType.CLIENT_LIST_REQUEST.value:
+                self.client_list_request()
+            elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
+                self.incoming_messages_request()
+            elif request_code == RequestType.REGISTER_REQUEST.value:
+                self.register_request()
+            elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
+                self.public_key_other_client_request()
+            elif request_code == RequestType.SEND_MESSAGE_REQUEST.value():
+                self.send_message_request()
+        except Exception as e:
+            print(f"Request error: {e}")
+            #TODO add the exception as to just return a server error maybe?
 
 
     #TODO update the request handling functions
     def client_list_request(self):
-        #continue.......
+        client_list = self.db.fetch_all_registered_clients(self.username)
+        # TODO continue from here, need to send it back I GUESS
     def incoming_messages_request(self):
-        #continue...
+        # TODO this later, after i figure out if i need to encrypt the messages or something in this part.
 
     def register_request(self):
         #continue with the logic of registering a new user, and check for a current user already...
+        if not self.db.does_client_exist(self.username):
+            server_client_id = self.db.insert_client(self.username, self.request.public_key)
+        else:
+            raise ValueError(f"Username '{self.username}' already exists in the DB.")
 
 
     def public_key_other_client_request(self):
@@ -557,6 +622,7 @@ class ClientManager:
         message_content_size = self.request.message.content_size
         message_content = self.request.message.message_content
 
+        #add the message to the DB
         #continue with the logic to send the message......
 
     def get_current_timestamp(self) -> str:
