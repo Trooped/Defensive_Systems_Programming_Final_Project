@@ -28,7 +28,11 @@ The server will do the operation and respond with the following statuses: TODO c
 import socket
 import selectors
 import struct
+from datetime import datetime
 from enum import Enum
+import sqlite3
+import os
+
 
 # general constants:
 VERSION_NUMBER = 1
@@ -134,6 +138,68 @@ class Message:
         self.content = None  # the message payload
 
 
+class MessageParser:
+    MIN_MESSAGE_LENGTH = RequestFieldsSizes.CLIENT_ID_SIZE.value
+    MESSAGE_TYPE_SIZE = 1
+    MESSAGE_CONTENT_SIZE = 4
+
+    # Message types
+    SYMMETRICAL_KEY_REQUEST_MESSAGE = 1
+    SYMMETRICAL_KEY_SEND_MESSAGE = 2
+    TEXT_SEND_MESSAGE = 3
+    #FILE_SEND_MESSAGE = 4 todo add this feature!
+
+    def __init__(self, request):
+        self.request = request  # Contains the request bytes
+        self.target_client_id = None
+        self.message_type = None
+        self.content_size = None
+        self.message_content = None
+
+    def parse_message(self):
+        try:
+            offset = 0
+            if len(self.request) < self.MIN_MESSAGE_LENGTH.value:
+                raise ValueError("Message is too short to be valid. No valid client id field was received.")
+
+            self.target_client_id = struct.unpack('<16s', self.request[
+                                                    : self.MIN_MESSAGE_LENGTH.value])
+            offset = self.MIN_MESSAGE_LENGTH.value
+
+            if len(self.request) < offset + self.MESSAGE_TYPE_SIZE.value:
+                raise ValueError("Message is too short to be valid. No valid message type field was received.")
+            self.message_type = struct.unpack('<B', self.request[
+                                                   offset : offset + self.MESSAGE_TYPE_SIZE.value])
+            offset = offset + self.MESSAGE_TYPE_SIZE.value
+
+            if self.message_type == self.SYMMETRICAL_KEY_REQUEST_MESSAGE.value:
+                #handle this, make sure that the content size = 0 and dump the payload
+            elif self.message_type == self.SYMMETRICAL_KEY_SEND_MESSAGE.value:
+                #handle that, take the symmetrical key and do something with it
+            elif self.message_type == self.TEXT_SEND_MESSAGE.value:
+                #hanlde thatt, take the encrypted message content
+            else:
+                raise ValueError("No valid message type field was received.")
+
+
+            """CONTENT SIZE AND CONTENT PARSING"""
+            if len(self.request) < offset + self.MESSAGE_CONTENT_SIZE.value:
+                raise ValueError("Message is too short to be valid. No valid  content size field was received.")
+            self.content_size = struct.unpack('<I', self.request[
+                                                   offset : offset + self.MESSAGE_CONTENT_SIZE.value])
+            offset = offset + self.MESSAGE_CONTENT_SIZE.value
+
+            if len(self.request) < offset + self.content_size:
+                raise ValueError("Message is too short to be valid. No valid content field was received.")
+
+
+        except struct.error as e:
+            print(f"Error unpacking message payload: {e}")
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+
+
+
 class Request:
     def __init__(self, request_binary):
         self.request = request_binary
@@ -152,18 +218,12 @@ class Request:
         elif self.request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:  # case 602
             self.target_client_id = None
         elif self.request_code == RequestType.SEND_MESSAGE_REQUEST.value:  # case 603
-            self.target_client_id = None
-            self.message_type = None
-            self.content_size = None
-            self.message_content = None
+            self.message = None
 
         self.parse_payload()
 
 
-
-
     def parse_payload(self):
-
         try:
             if len(self.request) < self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value:
                 raise ValueError("Request is too short to be valid. No valid payload size field was received.")
@@ -197,8 +257,8 @@ class Request:
                 # TODO call the next functions!
 
             elif self.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
-                #TODO call the parse message request function!
-            
+                self.message = MessageParser(self.request[self.offset:self.offset + self.payload_size])
+
             else:
                 raise ValueError("Invalid request code.")
 
@@ -221,29 +281,8 @@ class Request:
             # Unpack the request id
             self.client_id = struct.unpack('<16s', self.request[:self.offset])
 
-            # validate_range("version", server_version, "uint8_t")
+            # validate_range("version", server_version, "uint8_t") TODO add this!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
             # self.validate_status(status)
-
-            """
-            # Check if the status indicates an error (1001, 1002, 1003)
-            if status in (
-            Status.FILE_NOT_FOUND_ERR.value, Status.NO_FILES_IN_USER_FOLDER_ERR.value, Status.SERVER_ERROR.value):
-                if status == Status.FILE_NOT_FOUND_ERR.value:
-                    print(
-                        f"Error received with status: {status}, file doesn't exist on server, operation {request_operation} failed.")
-                elif status == Status.NO_FILES_IN_USER_FOLDER_ERR.value:
-                    print(
-                        f"Error received with status: {status}, there are no files in the user folder in the server, operation {request_operation} failed.")
-                else:
-                    if server_version != CLIENT_VERSION:  # if a general error is returned, and there's a version mismatch between client and server, print it.
-                        print(
-                            f"Error received with status: {status}, version mismatch between server and client, operation {request_operation} failed.")
-                    else:
-                        print(
-                            f"Error received with status: {status}, general server error, operation {request_operation} failed.")
-                print()  # print a new line
-                return
-            """
 
             if len(self.request) < self.offset + RequestOffset.CLIENT_VERSION_SIZE.value:
                 # Check that we received a valid client version
@@ -264,17 +303,7 @@ class Request:
                 '<H', self.request[self.offset:self.offset + RequestOffset.REQUEST_CODE_SIZE.value])
             self.offset += RequestOffset.REQUEST_CODE_SIZE.value
 
-            """
-            if len(self.request) < offset + MessageOffset.TYPE_MESSAGE_SIZE.value:
-                # Check that we received a valid type field
-                raise ValueError(
-                    "Response is too short to be valid, invalid request type length was received.")
-
-            request_type = struct.unpack('<B', self.request[offset:MessageOffset.TYPE_MESSAGE_SIZE.value])
-            offset += MessageOffset.TYPE_MESSAGE_SIZE.value
-            """
-            # TODO add a request type managing!!
-
+            #TODO add length validation for all "size" fields followed by payload, like in the next example:
             """
             # Skip the filename of `name_len` bytes
             filename_received = response[offset:offset + name_len].decode('ascii')
@@ -336,6 +365,174 @@ class Request:
             print(f"Error unpacking request: {e}")
         except Exception as e:
             print(f"Unexpected error: {e}")
+
+
+"""
+class Request:
+
+    def __init__(self, buffer: bytes):
+        if len(buffer) < REQUEST_MIN_LEN:
+            raise ValueError(
+                f"Invalid request length {len(buffer)} < {REQUEST_MIN_LEN}"
+            )
+        self.client_id = buffer[:CLIENT_ID_LEN]
+        buffer = buffer[CLIENT_ID_LEN:]
+        header_remaining_len = 7
+        self.version, self.code, self.payload_size = struct.unpack(
+            "<BHI", buffer[:header_remaining_len]
+        )
+        self.code = RequestCode(self.code)
+        validate_request_code(self.code)
+        validate_range("payload_size", self.payload_size, "uint32_t")
+        validate_range("version", self.version, "uint8_t")
+        buffer = buffer[header_remaining_len:]
+        if len(buffer) != self.payload_size:
+            raise ValueError(
+                f"Invalid payload length {len(buffer)} != {self.payload_size}"
+            )
+        self.payload = buffer
+"""
+
+#TODO add a validate username function!!!!!!!!!!!!!
+class Database:
+    DB_FILENAME = "defensive.db"
+    CLIENTS_TABLE_NAME = "clients"
+    MESSAGES_TABLE_NAME = "messages"
+
+    def __init__(self):
+        self.connection = sqlite3.connect(self.DB_FILENAME)
+        self.create_tables() # Creates the clients and messages tables if they don't exist
+
+
+    def does_client_exist(self, username: str) -> bool:
+        cursor = self.connection.cursor()
+        try:
+            # Query to check if the username exists
+            cursor.execute(
+                f"SELECT COUNT(*) FROM {self.CLIENTS_TABLE_NAME} WHERE name = (?);", username)
+            result = cursor.fetchone()
+            return result[0] > 0  # True if count > 0, otherwise False
+        except Exception as e:
+            return False
+        finally:
+            cursor.close()
+
+    def get_client_by_name(self, username: str):
+        """Get a client by their username."""
+
+        try:
+            cursor = self.conn.cursor()
+            cursor.execute(
+                f"SELECT * FROM {self.CLIENTS_TABLE} WHERE name = ?;", (username,)
+            )
+            rows = cursor.fetchall()
+        except Exception as e:
+            print(f"ERROR: Failed to retrieve client by username '{username}': {e}")
+            return None  # Return `None` to indicate an error occurred
+        finally:
+            cursor.close()  # Ensure the cursor is always closed
+
+        if not rows:
+            return None  # Return `None` if no client is found
+        return rows[0]  # Return the first matching row
+
+
+    def insert_client(self, username: str):
+        """Insert a new client into the DB"""
+        if not self.does_client_exist(username):
+            client_id = os.urandom(RequestFieldsSizes.CLIENT_ID_SIZE.value)
+            cursor = self.connection.cursor()
+            try:
+                cursor.execute(
+                    f"INSERT INTO {self.CLIENTS_TABLE_NAME} (id, name, public_key, last_seen) VALUES (?, ?, ?, ?);",
+                    (client_id, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+                )
+                self.connection.commit()
+            except Exception as e:
+                print(f"Error inserting new client into DB: {e}")
+            finally:
+                cursor.close()
+        else:
+            print(f"Client {username} already exists in the DB") #TODO maybe throw an error here??
+
+    def create_tables(self):
+        try:
+            cursor = self.connection.cursor()
+            cursor.execute(
+                f"""CREATE TABLE IF NOT EXISTS {self.CLIENTS_TABLE_NAME} (
+                        id BLOB PRIMARY KEY,
+                        name TEXT,
+                        public_key BLOB,
+                        last_seen DATETIME
+                    )"""
+            )
+            cursor.execute(
+                f"""CREATE TABLE IF NOT EXISTS {self.MESSAGES_TABLE_NAME}(
+                        id INTEGER,
+                        to_client BLOB, 
+                        from_client BLOB,
+                        type INTEGER,
+                        content BLOB
+                    )"""
+            )
+            print("Tables created successfully.")
+        except Exception as e:
+            print(f"ERROR: Failed to create tables: {e}")
+        finally:
+            cursor.close()  # Ensure the cursor is closed
+
+
+
+class ClientManager:
+    def __init__(self, request_bytes, database):
+        self.request_bytes = request_bytes
+        self.request = Request(self.request_bytes)
+        self.db = database
+        self.client_id = self.request.client_id
+        self.username = None
+        self.last_active_time = None
+
+    def handle_request(self):
+        request_code = self.request.request_code
+
+        #TODO after handling the request, handle the response and return it!!!
+        if request_code == RequestType.CLIENT_LIST_REQUEST.value:
+            self.client_list_request()
+        elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
+            self.incoming_messages_request()
+        elif request_code == RequestType.REGISTER_REQUEST.value:
+            self.register_request()
+        elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
+            self.public_key_other_client_request()
+        elif request_code == RequestType.SEND_MESSAGE_REQUEST.value():
+            self.send_message_request()
+
+
+    #TODO update the request handling functions
+    def client_list_request(self):
+        #continue.......
+    def incoming_messages_request(self):
+        #continue...
+
+    def register_request(self):
+        #continue with the logic of registering a new user, and check for a current user already...
+
+
+    def public_key_other_client_request(self):
+
+
+
+    def send_message_request(self):
+        target_client_id = self.request.message.target_client_id
+        message_type = self.request.message.message_type
+        message_content_size = self.request.message.content_size
+        message_content = self.request.message.message_content
+
+        #continue with the logic to send the message......
+
+    def get_current_timestamp(self) -> str:
+        """Returns the current time in ISO 8601 format, for use in DB clients table"""
+        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # ISO 8601 format
 
 
 class PortFileProcessor:
@@ -401,6 +598,8 @@ def selector_server(port_number):
     server_socket.setblocking(False)  # Non-blocking mode
     sel.register(server_socket, selectors.EVENT_READ, data=None)
 
+    db = Database()
+
     print(f"Server running on port {port_number}...")
 
     while True:
@@ -422,7 +621,7 @@ def selector_server(port_number):
                         client_socket.buffer = b""
 
                     chunk = client_socket.recv(4096)  # Read a chunk of data TODO add a constant
-                    if chunk:
+                    if chunk: #TODO is it while or if?????????????????????????????????????????????????????
                         client_socket.buffer += chunk  # Accumulate data
                         print(
                             f"Accumulating data from {client_address}: {len(client_socket.buffer)} bytes received so far.")
