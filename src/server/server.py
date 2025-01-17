@@ -399,6 +399,7 @@ class Database:
 
 
     def does_client_exist(self, username: str) -> bool:
+        """Checks if the username exists in the database"""
         cursor = self.connection.cursor()
         try:
             # Query to check if the username exists
@@ -413,9 +414,9 @@ class Database:
 
     def get_client_by_name(self, username: str):
         """Get a client by their username."""
-
+        cursor = self.connection.cursor()
         try:
-            cursor = self.conn.cursor()
+            self.validate_username(username) # Validate the given username
             cursor.execute(
                 f"SELECT * FROM {self.CLIENTS_TABLE} WHERE name = ?;", (username,)
             )
@@ -430,35 +431,69 @@ class Database:
             return None  # Return `None` if no client is found
         return rows[0]  # Return the first matching row
 
+    # TODO validate all message fields inside of the message class
+    def insert_message(self, to_client_id, from_client_id, message_type, content):
+        """Insert a message into the DB Messages table"""
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                f"INSERT INTO {self.MESSAGES_TABLE_NAME} (to_client, from_client, type, content) VALUES (?, ?, ?, ?);",
+                (to_client_id, from_client_id, message_type, content)
+            )
+            self.connection.commit()
+        except Exception as e:
+            print(f"ERROR: unable to insert message into DB: {e}")
+        finally:
+            cursor.close()
+
+
 
     def insert_client(self, username, public_key):
-        """Insert a new client into the DB"""
-        if not self.does_client_exist(username):
-            server_client_id = os.urandom(RequestFieldsSizes.CLIENT_ID_SIZE.value)
-            cursor = self.connection.cursor()
-            try:
-                cursor.execute(
-                    f"INSERT INTO {self.CLIENTS_TABLE_NAME} (id, name, public_key, last_seen) VALUES (?, ?, ?, ?);",
-                    (server_client_id, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value), datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
-                )
-                self.connection.commit()
-                if public_key: #TODO is it right to change the public key here?
-                    self.insert_public_key(username, public_key)
+        """
+        Insert a new client into the DB.
+        """
+        cursor = self.connection.cursor()
+        try:
+            # Validate the username
+            self.validate_username(username)
 
-            except Exception as e:
-                print(f"Error inserting new client into DB: {e}")
-            finally:
-                cursor.close()
-                return server_client_id
-        else:
-            print(f"Client {username} already exists in the DB") #TODO maybe throw an error here??
+            # Ensure the client doesn't already exist
+            if self.does_client_exist(username):
+                raise ValueError(f"Client '{username}' already exists in the database.")
+
+            # Generate a server-side client ID TODO maybe it's just an index? and not a random uuid????????
+            server_client_id = os.urandom(RequestFieldsSizes.CLIENT_ID_SIZE.value)
+
+            # Insert the client into the database
+            cursor.execute(
+                f"INSERT INTO {self.CLIENTS_TABLE_NAME} (id, name, public_key, last_seen) VALUES (?, ?, ?, ?);",
+                (server_client_id, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value),
+                 datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            )
+            self.connection.commit()
+
+            # Optionally update the public key
+            if public_key:
+                self.insert_public_key(username, public_key)
+
+            return server_client_id
+
+        except ValueError as ve:
+            print(f"Validation error: {ve}")
+            raise
+        except Exception as e:
+            print(f"Error inserting new client into DB: {e}")
+            raise
+        finally:
+            cursor.close()
+
 
     def insert_public_key(self, username: str, public_key: bytes):
         """
         Insert or update the public key for a specific client in the database.
         """
+        cursor = self.connection.cursor()
         try:
-            cursor = self.connection.cursor()
             cursor.execute(
                 f"UPDATE {self.CLIENTS_TABLE_NAME} SET public_key = ? WHERE name = ?;",
                 (public_key, username)
@@ -503,6 +538,84 @@ class Database:
         finally:
             cursor.close()
 
+    def validate_username(self, username: str):
+        if len(username) > RequestFieldsSizes.CLIENT_NAME_SIZE.value:
+            raise ValueError("Invalid username. The username must not exceed 255 characters.")
+        for ch in username:
+            if not ch.isalpha() and ch != " ":
+                raise ValueError("Invalid username. The username must not contain any special characters.")
+
+    def get_username_by_uuid(self, client_id: bytes) -> str:
+        """
+        Get a client's username by their UUID (id).
+        Returns the username as a string or None if the client does not exist.
+        """
+        cursor = self.connection.cursor()
+        try:
+            # Query the database for the username
+            cursor.execute(
+                f"SELECT name FROM {self.CLIENTS_TABLE_NAME} WHERE id = ?;", (client_id,)
+            )
+            result = cursor.fetchone()
+        except Exception as e:
+            print(f"ERROR: Failed to fetch username for ID '{client_id}': {e}")
+            return None  # Return None in case of an error
+        finally:
+            cursor.close()  # Ensure the cursor is closed
+
+        # Check if the user exists
+        if result is None:
+            print(f"WARNING: No client found with id '{client_id}'.")
+            return None
+
+        return result[0]  # Return the username as a string
+
+    def fetch_messages_by_to_client(self, to_client_id: bytes) -> list:
+        """
+        Fetch all messages for a given to_client ID.
+        Returns a list of [username, content] for each message.
+        Deletes the messages after fetching them.
+        """
+        cursor = self.connection.cursor()
+        messages = []
+        try:
+            # Fetch all messages for the given to_client ID
+            cursor.execute(
+                f"SELECT from_client, content FROM {self.MESSAGES_TABLE_NAME} WHERE to_client = ?;", (to_client_id,)
+            )
+            results = cursor.fetchall()
+
+            # Process each message
+            for from_client_id, content in results:
+                username = self.get_username_by_uuid(from_client_id)  # Get the username from the from_client ID
+                if username is not None:
+                    messages.append([username, content])
+
+            # Delete the messages after fetching
+            self.delete_messages_by_to_client(to_client_id)
+        except Exception as e:
+            print(f"ERROR: Failed to fetch messages for to_client ID '{to_client_id}': {e}")
+        finally:
+            cursor.close()  # Ensure the cursor is closed
+
+        return messages
+
+    def delete_messages_by_to_client(self, to_client_id: bytes) -> None:
+        """
+        Delete all messages for a given to_client ID.
+        """
+        cursor = self.connection.cursor()
+        try:
+            cursor.execute(
+                f"DELETE FROM {self.MESSAGES_TABLE_NAME} WHERE to_client = ?;", (to_client_id,)
+            )
+            self.connection.commit()
+            print(f"Deleted all messages for to_client ID '{to_client_id}'.")
+        except Exception as e:
+            print(f"ERROR: Failed to delete messages for to_client ID '{to_client_id}': {e}")
+        finally:
+            cursor.close()  # Ensure the cursor is closed
+
     def create_tables(self):
         try:
             cursor = self.connection.cursor()
@@ -516,7 +629,7 @@ class Database:
             )
             cursor.execute(
                 f"""CREATE TABLE IF NOT EXISTS {self.MESSAGES_TABLE_NAME}(
-                        id INTEGER,
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
                         to_client BLOB, 
                         from_client BLOB,
                         type INTEGER,
@@ -613,10 +726,11 @@ class ClientManager:
 
 
     def public_key_other_client_request(self):
-
+        #todo
 
 
     def send_message_request(self):
+        from_client_id = self.client_id
         target_client_id = self.request.message.target_client_id
         message_type = self.request.message.message_type
         message_content_size = self.request.message.content_size
