@@ -83,6 +83,12 @@ class RequestFieldsSizes(Enum):
     MESSAGE_TYPE_SIZE = 1
     CONTENT_SIZE_SIZE = 4
 
+class EncryptionKeysSizes(Enum):
+    SYMMETRIC_KEY_SIZE = 128 # bits, 16 bytes
+    ASSYMETRIC_KEY_SIZE = 1024 # bits, 128 bytes
+    PUBLIC_KEY_SIZE = 160 # bytes
+
+
 class RequestType(Enum):
     """
     Here we define the different request types.
@@ -114,25 +120,10 @@ class ResponseType(Enum):
     # Message Size + Message content (ONE MESSAGE AFTER THE OTHER)
     GENERAL_ERROR = 9000  # Payload field is empty, Payload size = 0
 
-
-class Client:
-    def __init__(self):
-        self.id = None  # 16 bytes ID (128 bits)
-        self.user_name = None  # 255 bytes ASCII null-terminated string
-        self.public_key = None  # 160 bytes public client key
-        self.last_seen = None  # date, hour format - where the client last sent a request to the server
-
-
 class Message:
-    def __init__(self):
-        self.id = None  # 4 bytes index for the message ID
-        self.to_client = None  # 16 bytes ID of the target client
-        self.from_client = None  # 16 bytes ID of the sender client
-        self.type = None  # 1 byte of the type of message
-        self.content = None  # the message payload
-
-
-class MessageParser:
+    """
+    A general Message class that is responsible for parsing the received message and initializing it with the appropriate parameters.
+    """
     MIN_MESSAGE_LENGTH = RequestFieldsSizes.CLIENT_ID_SIZE.value
     MESSAGE_TYPE_SIZE = 1
     MESSAGE_CONTENT_SIZE = 4
@@ -149,6 +140,8 @@ class MessageParser:
         self.message_type = None
         self.content_size = None
         self.message_content = None
+
+        self.parse_message()
 
     def parse_message(self):
         try:
@@ -167,11 +160,11 @@ class MessageParser:
             offset = offset + self.MESSAGE_TYPE_SIZE.value
 
             if self.message_type == self.SYMMETRICAL_KEY_REQUEST_MESSAGE.value:
-                #handle this, make sure that the content size = 0 and dump the payload
+                self.symmetrical_key_request_message(offset)
             elif self.message_type == self.SYMMETRICAL_KEY_SEND_MESSAGE.value:
-                #handle that, take the symmetrical key and do something with it
+                self.symmetrical_key_send_message(offset)
             elif self.message_type == self.TEXT_SEND_MESSAGE.value:
-                #hanlde thatt, take the encrypted message content
+                self.text_send_message(offset)
             else:
                 raise ValueError("No valid message type field was received.")
 
@@ -192,6 +185,36 @@ class MessageParser:
         except Exception as e:
             print(f"Unexpected error: {e}")
 
+    def symmetrical_key_request_message(self, offset):
+        """ Handle symmetrical key request messages """
+        # Make sure that Content Size = 0
+        self.content_size = struct.unpack('<I', self.request[
+                                            offset: offset + self.MESSAGE_CONTENT_SIZE.value])
+        if self.content_size != 0:
+            raise ValueError("Invalid message. Symmetrical key request message must be empty.")
+
+
+    def symmetrical_key_send_message(self, offset):
+        """ Handle symmetrical key send messages """
+        if len(self.request) < offset + self.MESSAGE_CONTENT_SIZE.value:
+            raise ValueError("Message is too short to be valid. No valid  content size field was received.")
+        self.content_size = struct.unpack('<I', self.request[
+                                                offset: offset + self.MESSAGE_CONTENT_SIZE.value])
+        offset = offset + self.MESSAGE_CONTENT_SIZE.value
+        self.message_content = struct.unpack('<16s', self.request[offset: offset + EncryptionKeysSizes.SYMMETRIC_KEY_SIZE.value])
+        #todo maybe it's like the text_send_message? just interpret as bytes???
+
+        #TODO add a check to make sure that the sizes are correct and matching (content size = len(message content) and that it's correct).
+    def text_send_message(self, offset):
+        if len(self.request) < offset + self.MESSAGE_CONTENT_SIZE.value:
+            raise ValueError("Message is too short to be valid. No valid  content size field was received.")
+        self.content_size = struct.unpack('<I', self.request[
+                                                offset: offset + self.MESSAGE_CONTENT_SIZE.value])
+
+        offset = offset + self.MESSAGE_CONTENT_SIZE
+        self.message_content = self.request[offset: offset + self.content_size[0]]
+
+        #todo same as above, validate length matching and correct type etc...
 
 
 class Request:
@@ -246,12 +269,12 @@ class Request:
                 if len(self.request) < self.offset + RequestFieldsSizes.CLIENT_ID_SIZE.value:
                     raise ValueError("Request is too short to be valid. No valid client id field was received.")
                 client_id_bytes = struct.unpack('<16s', self.request[self.offset:self.offset + RequestFieldsSizes.CLIENT_ID_SIZE.value])
-                self.client_id = client_id_bytes[0]
+                self.target_client_id = client_id_bytes[0]
 
                 # TODO call the next functions!
 
             elif self.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
-                self.message = MessageParser(self.request[self.offset:self.offset + self.payload_size])
+                self.message = Message(self.request[self.offset:self.offset + self.payload_size[0]])
 
             else:
                 raise ValueError("Invalid request code.")
@@ -431,6 +454,7 @@ class Database:
             return None  # Return `None` if no client is found
         return rows[0]  # Return the first matching row
 
+
     # TODO validate all message fields inside of the message class
     def insert_message(self, to_client_id, from_client_id, message_type, content):
         """Insert a message into the DB Messages table"""
@@ -446,7 +470,30 @@ class Database:
         finally:
             cursor.close()
 
+    def get_public_key_by_id(self, client_id: bytes) -> bytes:
+        """
+        Get the public key of a client by their ID.
+        Returns the public key as bytes, or None if the client does not exist.
+        """
+        cursor = self.connection.cursor()
+        try:
+            # Query the database for the public key
+            cursor.execute(
+                f"SELECT public_key FROM {self.CLIENTS_TABLE_NAME} WHERE id = ?;", (client_id,)
+            )
+            result = cursor.fetchone()
+        except Exception as e:
+            print(f"ERROR: Failed to fetch public key for ID '{client_id}': {e}")
+            return None  # Return None in case of an error
+        finally:
+            cursor.close()  # Ensure the cursor is closed
 
+        # Check if the client exists
+        if result is None:
+            print(f"WARNING: No client found with ID '{client_id}'.")
+            return None
+
+        return result[0]  # Return the public key as bytes
 
     def insert_client(self, username, public_key):
         """
@@ -570,7 +617,7 @@ class Database:
 
         return result[0]  # Return the username as a string
 
-    def fetch_messages_by_to_client(self, to_client_id: bytes) -> list:
+    def fetch_messages_to_client(self, to_client_id: bytes) -> list:
         """
         Fetch all messages for a given to_client ID.
         Returns a list of [username, content] for each message.
@@ -708,6 +755,8 @@ class ClientManager:
         except Exception as e:
             print(f"Request error: {e}")
             #TODO add the exception as to just return a server error maybe?
+        finally:
+            self.db.update_last_seen(self.username) #todo maybe it's not here??? maybe it's better in the top of the function????
 
 
     #TODO update the request handling functions
@@ -715,7 +764,8 @@ class ClientManager:
         client_list = self.db.fetch_all_registered_clients(self.username)
         # TODO continue from here, need to send it back I GUESS
     def incoming_messages_request(self):
-        # TODO this later, after i figure out if i need to encrypt the messages or something in this part.
+        messages_list = self.db.fetch_all_registered_messages(self.username)
+        # todo continue with the response etc..
 
     def register_request(self):
         #continue with the logic of registering a new user, and check for a current user already...
@@ -726,22 +776,17 @@ class ClientManager:
 
 
     def public_key_other_client_request(self):
-        #todo
+        public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
 
 
     def send_message_request(self):
         from_client_id = self.client_id
         target_client_id = self.request.message.target_client_id
         message_type = self.request.message.message_type
-        message_content_size = self.request.message.content_size
         message_content = self.request.message.message_content
 
-        #add the message to the DB
-        #continue with the logic to send the message......
+        self.db.insert_message(target_client_id, from_client_id, message_type, message_content)
 
-    def get_current_timestamp(self) -> str:
-        """Returns the current time in ISO 8601 format, for use in DB clients table"""
-        return datetime.now().strftime('%Y-%m-%d %H:%M:%S')  # ISO 8601 format
 
 
 class Server:
