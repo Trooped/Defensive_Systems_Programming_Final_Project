@@ -110,6 +110,7 @@ namespace ProtocolConstants {
     // Message Send Request Sizes
     constexpr size_t MESSAGE_TYPE_SIZE = 1;    // Size of Message type field size
     constexpr size_t MESSAGE_CONTENT_FIELD_SIZE = 4;    // Size of message content field (describing the size of the following message content)
+    constexpr size_t MESSAGE_ID_SIZE = 4;
 
     // Request Payload Sizes
     constexpr size_t REGISTER_PAYLOAD_SIZE = CLIENT_NAME_SIZE + PUBLIC_KEY_SIZE;
@@ -124,6 +125,8 @@ namespace ProtocolConstants {
     // Encryption Keys Sizes:
     //ADDDDDDDDDDDDDDDDDDDDDDDDD THE KEYS SIZES!!!!!!!!!!!!
     constexpr size_t PUBLIC_KEY_SIZE = 160;
+    constexpr size_t PRIVATE_KEY_SIZE = 128;
+    constexpr size_t SYMMETRIC_KEY_SIZE = 16;
 
     /*
     constexpr size_t BASIC_REQUEST_SIZE = USER_ID_SIZE + VERSION_SIZE + OP_SIZE;  // Fixed header size in bytes, consiting of only
@@ -133,57 +136,65 @@ namespace ProtocolConstants {
 
 }; // namespace Protocol
 
+// Class declarations for the Request & Message classes
 class BaseRequest {
 protected:
-    std::array<uint8_t, 16> client_id;
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
     uint8_t version;
     uint16_t request_code;
     uint32_t payload_size;
 public:
-    BaseRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
+    BaseRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
     /* MAYBE ADD THIS LATER? IS IT NECESSARY?
     const std::array<uint8_t, 16>& getClientIdBytes() const {
         return client_id;
     }
     */
     virtual ~BaseRequest() = default;
+    virtual void sendRequest(tcp::socket& socket) const;
 };
 
-class registerRequest : public BaseRequest {
+class RegisterRequest : public BaseRequest {
 protected:
     std::string client_name;
-    std::string public_key;
+    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
 public:
-    registerRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::string public_key);
+    RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key);
+    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArray(const std::string& str);
+    void sendRequest(tcp::socket& socket);
 };
 
 // No extra attributes, and payload size = 0. Relevant to 601 & 604 request codes
 class basicRequest : public BaseRequest {
 public:
-    basicRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
+    basicRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
+    void sendRequest(tcp::socket& socket);
 };
 
-class publicKeyRequest : public BaseRequest {
-    std::string target_client_id;
+class PublicKeyRequest : public BaseRequest {
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id;
 public:
-    publicKeyRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id);
+    PublicKeyRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id);
+    void sendRequest(tcp::socket& socket);
 };
 
 
 class Message : public BaseRequest{
 protected:
-    std::string target_client_id;
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id;
     uint8_t message_type;
     uint32_t message_content_size;
 public:
-    Message(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size);
+    Message(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size);
+    void sendRequest(tcp::socket& socket);
 };
 
 
 class symmetricKeyRequestMessage : public Message {
 
 public:
-    symmetricKeyRequestMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size);
+    symmetricKeyRequestMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size);
+    void sendRequest(tcp::socket& socket);
 
 };
 
@@ -192,29 +203,71 @@ protected:
     // ADD THE SYMMETRICAL KEY SIZE AND ATTRIBUTE, for right now let's say it's 160 bytes string
     std::string encrypted_symmetric_key;
 public:
-    symmetricKeySendMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key);
+    symmetricKeySendMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key);
+    void sendRequest(tcp::socket& socket);
 };
 
 class textMessage : public Message {
     std::vector<uint8_t> message_content;
 public:
-    textMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content);
+    textMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content);
+    void sendRequest(tcp::socket& socket);
+};
+
+
+// Class declarations for the Response classes - coming from the server
+
+class BaseResponse {
+protected:
+    uint8_t version;
+    uint16_t response_code;
+    uint32_t payload_size;
+public:
+    BaseResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
+};
+
+class RegisterResponse : public BaseResponse {
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+public:
+    RegisterResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id);
+};
+
+class ClientsListResponse : public BaseResponse {
+    // Do this either with 2 vectors for client_ids and client_names, or as only one client_id and client_name, and then create a separate class that'll handle the vectors... figure it out.
+};
+
+class PublicKeyResponse : public BaseResponse {
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey;
+public:
+    PublicKeyResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey);
+
+};
+
+class MessageSentResponse : public BaseResponse {
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+    uint32_t message_id;
+public:
+    MessageSentResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint32_t message_id);
+};
+
+
+class WaitingMessagesFetchResponse : public BaseResponse {
+    // same as the clientslist, how should i do that?
+
+};
+
+class ErrorResponse : public BaseResponse {
+    ErrorResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
 
 
 
 
-
-
-
-
-
-
-
-
-
-// Cryptopp Wrapper classes & functions declarations
+/*
+*	Wrapper Function and Classes Provided externally, for use with the project's demands.
+*/
 
 // RSA Wrappers
 class RSAPublicWrapper

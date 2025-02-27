@@ -13,30 +13,189 @@ using boost::asio::ip::tcp;
 BaseRequest::BaseRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
 	: client_id{ client_id }, version{ version }, request_code{ request_code }, payload_size{ payload_size } { }
 
-registerRequest::registerRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::string public_key)
+void BaseRequest::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
+
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+	
+	boost::asio::write(socket, buffer);
+}
+
+RegisterRequest::RegisterRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key)
 	: BaseRequest(client_id, version, request_code, payload_size), client_name(client_name), public_key(public_key) { }
+
+std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> RegisterRequest::stringToArray(const std::string& str) {
+	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> arr = {};  // Initialize with zeros
+	std::memcpy(arr.data(), str.data(), std::min(str.size(), ProtocolConstants::PUBLIC_KEY_SIZE));  // Copy data
+	return arr;
+}
+void RegisterRequest::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
+
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	while (client_name.length() < 255) {
+		client_name.append('\0');
+	}
+	const char* char_name = client_name.c_str();
+	request_stream.write(reinterpret_cast<const char*>(&char_name), sizeof(char_name));
+
+	request_stream.write(reinterpret_cast<const char*>(public_key.data()), public_key.size());
+
+	boost::asio::write(socket, buffer);
+}
+
 
 basicRequest::basicRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
 	: BaseRequest(client_id, version, request_code, payload_size) { }
+void basicRequest::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
-publicKeyRequest::publicKeyRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id)
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	boost::asio::write(socket, buffer);
+}
+
+PublicKeyRequest::PublicKeyRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id)
 	: BaseRequest(client_id, version, request_code, payload_size), target_client_id(target_client_id) { }
+void PublicKeyRequest::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
-Message::Message(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size)
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
+
+	boost::asio::write(socket, buffer);
+}
+
+
+Message::Message(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size)
 	: BaseRequest(client_id, version, request_code, payload_size), target_client_id(target_client_id), message_type(message_type), message_content_size(message_content_size) { }
+void Message::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
-symmetricKeyRequestMessage::symmetricKeyRequestMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size)
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
+	request_stream.put(message_type);
+
+	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+
+	boost::asio::write(socket, buffer);
+}
+
+symmetricKeyRequestMessage::symmetricKeyRequestMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size)
 	: Message(client_id, version, request_code, payload_size, target_client_id, message_type, message_content_size) { }
+void symmetricKeyRequestMessage::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
-symmetricKeySendMessage::symmetricKeySendMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key)
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
+	request_stream.put(message_type);
+
+	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+
+	// No content sent
+
+	boost::asio::write(socket, buffer);
+}
+
+
+symmetricKeySendMessage::symmetricKeySendMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key)
 	: Message(client_id, version, request_code, payload_size, target_client_id, message_type, message_content_size), encrypted_symmetric_key(encrypted_symmetric_key) { }
+void symmetricKeySendMessage::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
-textMessage::textMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content)
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
+	request_stream.put(message_type);
+
+	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+	
+	request_stream.write(reinterpret_cast<const char*>(&encrypted_symmetric_key), sizeof(encrypted_symmetric_key));
+
+	boost::asio::write(socket, buffer);
+}
+
+textMessage::textMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content)
 	: Message(client_id, version, request_code, payload_size, target_client_id, message_type, message_content_size), message_content(message_content) { }
+void textMessage::sendRequest(tcp::socket& socket) {
+	boost::asio::streambuf buffer;
+	std::ostream request_stream(&buffer);
+	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
+
+	request_stream.put(version);
+	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
+	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
+	request_stream.put(message_type);
+
+	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+
+	request_stream.write(reinterpret_cast<const char*>(&message_content), sizeof(message_content));
+
+	boost::asio::write(socket, buffer);
+}
 
 
 
+// Constructors & functions for Response classes
+BaseResponse::BaseResponse(uint8_t version, uint16_t response_code, uint32_t payload_size)
+	: version{ version }, response_code{ response_code }, payload_size{ payload_size } { }
 
+RegisterResponse::RegisterResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id)
+	: BaseResponse(version, response_code, payload_size), client_id(client_id) { }
+
+// handle the client list response!!!!!!!!!!!!!!
+
+PublicKeyResponse::PublicKeyResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey)
+	: BaseResponse(version, response_code, payload_size), client_id(client_id), pubkey(pubkey) { }
+
+MessageSentResponse::MessageSentResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint32_t message_id)
+	: BaseResponse(version, response_code, payload_size), client_id(client_id), message_id(message_id) { }
+
+// handle the waiting messages fetch response!!!!!!!!!!!!!!!!!!!!!!
+
+ErrorResponse::ErrorResponse(uint8_t version, uint16_t response_code, uint32_t payload_size)
+	: BaseResponse(version, response_code, payload_size) { }
+
+
+std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArray(const std::string& str) {
+	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> arr = {};  // Initialize with zeros
+	std::memcpy(arr.data(), str.data(), std::min(str.size(), ProtocolConstants::PUBLIC_KEY_SIZE));  // Copy data
+	return arr;
+}
 
 
 bool containsOnlyASCII(const std::string& name) {
@@ -56,23 +215,44 @@ bool isValidClientName(const std::string& client_name) {
 }
 
 
-void handleRegisterRequest(std::unique_ptr<BaseRequest> request) {
+
+
+
+void handleRegisterRequest(std::unique_ptr<BaseRequest> request, std::unique_ptr<BaseResponse> response) {
 	string username;
 	cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
 	cin >> username;
 	if (!isValidClientName(username)) {
-		cout << 
+		cout << "Invalid client name." << endl;
+		return;
 	}
 
-	request = make_unique<registerRequest>(
+	// Creating the private and public keys
+	RSAPrivateWrapper rsapriv;
+	std::string pubkey_str = rsapriv.getPublicKey();
+	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey = stringToArray(pubkey_str);
+	std::string priv_base64key = Base64Wrapper::encode(rsapriv.getPrivateKey());
+
+	// Creating the request
+	request = make_unique<RegisterRequest>(
 		ProtocolConstants::DEFAULT_CLIENT_ID,
 		ProtocolConstants::CLIENT_VERSION,
-		ProtocolConstants::Input_Codes::REGISTER,
+		ProtocolConstants::Request::REGISTER_REQUEST,
 		ProtocolConstants::REGISTER_PAYLOAD_SIZE,
 		username,
+		pubkey
+	);
 
-		)
+	// Send the request
+	
+	//socket!!!!!!!!!!!!!!! request->sendRequest();
+	
 
+	// Receive a response
+	//************ MAYBE CREATE A GENERIC RESPONSE POINTER IN THE HANDLEUSERINPUT AND THEN REUSE IT THROUGH ALL OF THE FUNCTIONS
+
+
+	// Enter the clientname, the ID and the private key in base 64 into the me.info file
 
 
 }
