@@ -13,7 +13,7 @@ using boost::asio::ip::tcp;
 BaseRequest::BaseRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
 	: client_id{ client_id }, version{ version }, request_code{ request_code }, payload_size{ payload_size } { }
 
-void BaseRequest::sendRequest(tcp::socket& socket) {
+void BaseRequest::sendRequest(tcp::socket& socket) const {
 	boost::asio::streambuf buffer;
 	std::ostream request_stream(&buffer);
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
@@ -28,11 +28,13 @@ void BaseRequest::sendRequest(tcp::socket& socket) {
 RegisterRequest::RegisterRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key)
 	: BaseRequest(client_id, version, request_code, payload_size), client_name(client_name), public_key(public_key) { }
 
+/*
 std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> RegisterRequest::stringToArray(const std::string& str) {
 	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> arr = {};  // Initialize with zeros
 	std::memcpy(arr.data(), str.data(), std::min(str.size(), ProtocolConstants::PUBLIC_KEY_SIZE));  // Copy data
 	return arr;
 }
+*/
 void RegisterRequest::sendRequest(tcp::socket& socket) {
 	boost::asio::streambuf buffer;
 	std::ostream request_stream(&buffer);
@@ -43,7 +45,7 @@ void RegisterRequest::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
 
 	while (client_name.length() < 255) {
-		client_name.append('\0');
+		client_name += '\0';
 	}
 	const char* char_name = client_name.c_str();
 	request_stream.write(reinterpret_cast<const char*>(&char_name), sizeof(char_name));
@@ -233,9 +235,14 @@ void handleRegisterRequest(std::unique_ptr<BaseRequest> request, std::unique_ptr
 	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey = stringToArray(pubkey_str);
 	std::string priv_base64key = Base64Wrapper::encode(rsapriv.getPrivateKey());
 
+
+	std::array<uint8_t, 16> default_uuid;
+	default_uuid.fill(0xAA);
+
+
 	// Creating the request
 	request = make_unique<RegisterRequest>(
-		ProtocolConstants::DEFAULT_CLIENT_ID,
+		default_uuid,
 		ProtocolConstants::CLIENT_VERSION,
 		ProtocolConstants::Request::REGISTER_REQUEST,
 		ProtocolConstants::REGISTER_PAYLOAD_SIZE,
@@ -328,7 +335,7 @@ bool doesFileExist(const std::string& filename) {
 
 
 bool isPortValid(const string& port) {
-	if (port.length() <= 5 || !(port.find_first_not_of("0123456789") != std::string::npos)) {
+	if (port.length() <= 5 || port.find_first_not_of("0123456789") != std::string::npos) {
 		int num_port = std::stoi(port);
 		if (num_port < 0 || num_port > 65353) {
 			return false;
@@ -343,86 +350,58 @@ bool isPortValid(const string& port) {
 }
 
 bool isIPvalid(const string& ip) {
-	struct sockaddr_in sa;
-	int result = inet_pton(AF_INET, ip.c_str(), &(sa.sin_addr));
-	return result == 1;
+	try {
+		boost::asio::ip::make_address(ip); // This will throw if the IP is invalid
+		return true;
+	}
+	catch (...) {
+		return false;
+	}
 }
 
 void clearFileAndResetPointer(std::ifstream& file) {
 	file.clear();
-	file.seekg(0);
+	file.seekg(0, std::ios::beg);
 }
 
-std::string readPortfromFile(std::ifstream& file) {
-	std::string port;
-	char ch;
-	while (ch != ':') {
-		file.get(ch);
-	}
-	while (ch != '\n') {
-		file.get(ch);
-		port += ch;
-	}
-	clearFileAndResetPointer(file);
-	return port;
+std::string readIPfromFile(std::string& line) {
+	size_t separator = line.find(':');
+	return line.substr(0, separator);
 }
 
-
-std::string readIPfromFile(std::ifstream& file) {
-	std::string ip;
-	char ch;
-	while (ch != ':') {
-		file.get(ch);
-		ip += ch;
-	}
-	clearFileAndResetPointer(file);
-	return ip;
+std::string readPortfromFile(std::string& line) {
+	size_t separator = line.find(':');
+	return line.substr(separator + 1);
 }
-
 
 //NEED TO UPDATE THIS FUCKING FUNCTION
-bool isServerInfoFileValid(std::ifstream& file) {
-	std::string ip;
-	std::string port;
+std::string validate_server_file(std::ifstream& file) {
+	std::string line;
 
-
-	//TODO is this the right way to make a heap allocated string (and delete it later!???)
-	std::string* line = new string;
-	int ctr = 0;
-	while (std::getline(file, *line)){
-		ctr++;
-		if (ctr > 1) {
-			return false; // more than 1 line, invalid
-		}
+	std::getline(file, line);
+	if (!file.eof()) {
+		throw std::runtime_error("Too many lines in server.info file");
 	}
-	delete line;
+
 	clearFileAndResetPointer(file);
 
-	char ch;
-	while (ch != '\n' && ch != ':') {
-		if (file.get(ch) && ip.length()<=15) { //TODO add a constant to max_ip_length
-			ip += ch;
-		}
-		else {
-			return false; //early exit, before even the ':' between the ip and port, or the ip is too long!
-		}
+	// Split by ':'
+	size_t separator = line.find(':');
+	if (separator == std::string::npos) {
+		throw std::runtime_error("no ':' found in server.info file");
 	}
-	if (ch == ':') {
-		while (ch != '\n' && port.length() <= 5) { //TODO add a constant to max_port_length
-			port += ch;
-		}
-	}
-	else {
-		return false; // no port found
-	}
+
+	std::string ip = line.substr(0, separator);
+	std::string port = line.substr(separator + 1);
 
 	if (!isIPvalid(ip) || !isPortValid(port)) {
-		return false;
+		throw std::runtime_error("Invalid IP or Port in server.info file");
 	}
-	clearFileAndResetPointer(file);
-	return true;
+
+	return line;
 }
 
+/*
 std::ifstream openFileAndValidate(const string& filename) {
 	try {
 		if (!doesFileExist(filename)) {
@@ -440,15 +419,30 @@ std::ifstream openFileAndValidate(const string& filename) {
 		throw; // Re-throw the exception to propagate the error
 	}
 }
+*/
 
 
-void main() {
+int main() {
 	boost::asio::io_context io_context;
 	try {
-		std::ifstream file = openFileAndValidate("server.info");
-		std::string ip = readIPfromFile(file);
-		std::string port = readPortfromFile(file);
+		std::string filename = "server.info";
+		if (!doesFileExist(filename)) {
+			throw std::runtime_error("File " + filename + " doesn't exist.");
+		}
+		std::ifstream file(filename);
+		if (!file.is_open()) {
+			throw std::runtime_error("Failed to open file: " + filename);
+		}
+		std::string info_line = validate_server_file(file);
+		std::string ip = readIPfromFile(info_line);
+		std::string port = readPortfromFile(info_line);
 		file.close();
+
+		//testinggggggggggg
+		cout << ip << endl;
+		cout << port << endl;
+
+		////////////////////
 
 		while (true) {
 			int responseCode;
@@ -476,7 +470,7 @@ void main() {
 	catch (const std::exception& e) {
 		std::cerr << "Error: " << e.what() << "\n";
 	}
-	return;
+	return 0;
 }
 
 

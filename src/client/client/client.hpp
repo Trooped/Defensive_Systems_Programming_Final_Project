@@ -39,8 +39,6 @@ The server will do the operation and respond with the following statuses:
 #include <fstream>
 #include <filesystem>
 #include <vector>
-#include <arpa/inet.h>
-
 
 #include "cryptlib.h"
 #include <osrng.h>
@@ -53,7 +51,7 @@ The server will do the operation and respond with the following statuses:
 #include <immintrin.h>	// _rdrand32_step
 #include <iomanip>
 
-
+using boost::asio::ip::tcp;
 
 namespace ProtocolConstants {
 
@@ -76,7 +74,7 @@ namespace ProtocolConstants {
 
 
     // Request Codes (for the protocol)
-    enum Request : uint8_t {
+    enum Request : uint16_t {
         REGISTER_REQUEST = 600,
         CLIENTS_LIST_REQUEST = 601,
         FETCH_OTHER_CLIENT_PUBLIC_KEY_REQUEST = 602,
@@ -102,6 +100,13 @@ namespace ProtocolConstants {
         GENERAL_ERROR = 9000
     };
 
+
+    // Encryption Keys Sizes:
+    //ADDDDDDDDDDDDDDDDDDDDDDDDD THE KEYS SIZES!!!!!!!!!!!!
+    constexpr size_t PUBLIC_KEY_SIZE = 160;
+    constexpr size_t PRIVATE_KEY_SIZE = 128;
+    constexpr size_t SYMMETRIC_KEY_SIZE = 16;
+
     // General Request Sizes
     constexpr size_t CLIENT_ID_SIZE = 16;           // Size of user ID field (16 bytes)
     constexpr size_t VERSION_SIZE = 1;           // Size of version field (1 byte)
@@ -122,13 +127,9 @@ namespace ProtocolConstants {
 
 
     // More constants
-    constexpr std::array<uint8_t, 16> DEFAULT_CLIENT_ID = AAAAAAAAAAAAAAAA; // Default client ID, to use when registering
+    constexpr char DEFAULT_CLIENT_ID[16] = {0}; // Default client ID, to use when registering
 
-    // Encryption Keys Sizes:
-    //ADDDDDDDDDDDDDDDDDDDDDDDDD THE KEYS SIZES!!!!!!!!!!!!
-    constexpr size_t PUBLIC_KEY_SIZE = 160;
-    constexpr size_t PRIVATE_KEY_SIZE = 128;
-    constexpr size_t SYMMETRIC_KEY_SIZE = 16;
+    
 
     /*
     constexpr size_t BASIC_REQUEST_SIZE = USER_ID_SIZE + VERSION_SIZE + OP_SIZE;  // Fixed header size in bytes, consiting of only
@@ -162,7 +163,7 @@ protected:
     std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
 public:
     RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key);
-    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArray(const std::string& str);
+    /*std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArray(const std::string& str);*/
     void sendRequest(tcp::socket& socket);
 };
 
