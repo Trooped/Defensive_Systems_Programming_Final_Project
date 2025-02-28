@@ -39,6 +39,8 @@ The server will do the operation and respond with the following statuses:
 #include <fstream>
 #include <filesystem>
 #include <vector>
+#include <arpa/inet.h>
+
 
 #include "cryptlib.h"
 #include <osrng.h>

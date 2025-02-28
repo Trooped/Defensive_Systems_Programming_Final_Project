@@ -304,6 +304,137 @@ void handleUserInput(int operation_code) {
 	return;
 }
 
+
+/*
+	Connect to the server and return the socket.
+*/
+std::shared_ptr<tcp::socket> connectToServer() { //TAKE THE IP AND PORT AS PARAMETERS!!!!!!!!!!!!!!
+	boost::asio::io_context io_context;
+	auto socket = std::make_shared<tcp::socket>(io_context);
+	tcp::resolver resolver(io_context);
+	//boost::asio::connect(s, resolver.resolve(address, port)); FIND THE IP ADDRESS AND PORT BEFOREHAND!!!
+
+	return socket;
+}
+
+
+bool doesFileExist(const std::string& filename) {
+	if (filesystem::exists(filename)) {
+		return true;
+	}
+	else {
+		//throw std::runtime_error("File " + filename + " doesn't exist. Aborting connection.");
+		return false;
+	}
+}
+
+
+bool isPortValid(const string& port) {
+	if (port.length() <= 5 || !(port.find_first_not_of("0123456789") != std::string::npos)) {
+		int num_port = std::stoi(port);
+		if (num_port < 0 || num_port > 65353) {
+			return false;
+		}
+		else {
+			return true;
+		}
+	}
+	else {
+		return false;
+	}
+
+}
+
+bool isIPvalid(const string& ip) {
+	struct sockaddr_in sa;
+	int result = inet_pton(AF_INET, ip.c_str(), &(sa.sin_addr));
+	return result == 1;
+}
+
+void clearFileAndResetPointer(std::ifstream& file) {
+	file.clear();
+	file.seekg(0);
+}
+
+std::string readPortfromFile(std::ifstream& file) {
+	std::string port;
+	char ch;
+	while (ch != ':') {
+		file.get(ch);
+	}
+	while (ch != '\n') {
+		file.get(ch);
+		port += ch;
+	}
+	clearFileAndResetPointer(file);
+	return port;
+}
+
+
+std::string readIPfromFile(std::ifstream& file) {
+	std::string ip;
+	char ch;
+	while (ch != ':') {
+		file.get(ch);
+		ip += ch;
+	}
+	clearFileAndResetPointer(file);
+	return ip;
+}
+
+bool isServerInfoFileValid(std::ifstream& file) {
+	std::string ip;
+	std::string port;
+
+	char ch;
+	while (ch != '\n' && ch != ':') {
+		if (file.get(ch)) {
+			ip += ch;
+		}
+		else {
+			return false; //early exit, before even the ':' between the ip and port
+		}
+	}
+	if (ch == ':') {
+		while (ch != '\n') {
+			port += ch;
+		}
+	}
+	else {
+		return false; // no port found
+	}
+
+	if (!isIPvalid(ip) || !isPortValid(port)) {
+		return false;
+	}
+	clearFileAndResetPointer(file);
+	return true;
+}
+
+std::string openFile(const string& filename) {
+	try {
+		if (!doesFileExist(filename)) {
+			throw std::runtime_error("File " + filename + " doesn't exist. Aborting connection.");
+		}
+
+		std::ifstream file(filename);
+		if (!file.is_open()) {
+			throw std::runtime_error("Failed to open file: " + filename);
+		}
+
+		if (!isServerInfoFileValid(file)) {
+			throw std::runtime_error("Invalid server.info file.");
+		}
+		std::string ip = readIPfromFile(file);
+		std::string port = readPortfromFile(file);
+	}
+	catch (const std::exception& e) {
+		throw; // Re-throw the exception to propagate the error
+	}
+}
+
+
+
 void inputLoop() {
 	while (true) {
 		int responseCode;
