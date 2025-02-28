@@ -258,7 +258,7 @@ void handleRegisterRequest(std::unique_ptr<BaseRequest> request, std::unique_ptr
 }
 
 
-void handleUserInput(int operation_code) {
+void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 	std::unique_ptr<BaseRequest> request;
 
 	switch (operation_code) {
@@ -308,15 +308,13 @@ void handleUserInput(int operation_code) {
 /*
 	Connect to the server and return the socket.
 */
-std::shared_ptr<tcp::socket> connectToServer() { //TAKE THE IP AND PORT AS PARAMETERS!!!!!!!!!!!!!!
-	boost::asio::io_context io_context;
+std::shared_ptr<tcp::socket> connectToServer(const string& ip, const string& port, boost::asio::io_context& io_context) {
 	auto socket = std::make_shared<tcp::socket>(io_context);
 	tcp::resolver resolver(io_context);
-	//boost::asio::connect(s, resolver.resolve(address, port)); FIND THE IP ADDRESS AND PORT BEFOREHAND!!!
+	boost::asio::connect(*socket, resolver.resolve(ip, port));
 
 	return socket;
 }
-
 
 bool doesFileExist(const std::string& filename) {
 	if (filesystem::exists(filename)) {
@@ -342,7 +340,6 @@ bool isPortValid(const string& port) {
 	else {
 		return false;
 	}
-
 }
 
 bool isIPvalid(const string& ip) {
@@ -382,21 +379,36 @@ std::string readIPfromFile(std::ifstream& file) {
 	return ip;
 }
 
+
+//NEED TO UPDATE THIS FUCKING FUNCTION
 bool isServerInfoFileValid(std::ifstream& file) {
 	std::string ip;
 	std::string port;
 
+
+	//TODO is this the right way to make a heap allocated string (and delete it later!???)
+	std::string* line = new string;
+	int ctr = 0;
+	while (std::getline(file, *line)){
+		ctr++;
+		if (ctr > 1) {
+			return false; // more than 1 line, invalid
+		}
+	}
+	delete line;
+	clearFileAndResetPointer(file);
+
 	char ch;
 	while (ch != '\n' && ch != ':') {
-		if (file.get(ch)) {
+		if (file.get(ch) && ip.length()<=15) { //TODO add a constant to max_ip_length
 			ip += ch;
 		}
 		else {
-			return false; //early exit, before even the ':' between the ip and port
+			return false; //early exit, before even the ':' between the ip and port, or the ip is too long!
 		}
 	}
 	if (ch == ':') {
-		while (ch != '\n') {
+		while (ch != '\n' && port.length() <= 5) { //TODO add a constant to max_port_length
 			port += ch;
 		}
 	}
@@ -411,22 +423,18 @@ bool isServerInfoFileValid(std::ifstream& file) {
 	return true;
 }
 
-std::string openFile(const string& filename) {
+std::ifstream openFileAndValidate(const string& filename) {
 	try {
 		if (!doesFileExist(filename)) {
-			throw std::runtime_error("File " + filename + " doesn't exist. Aborting connection.");
+			throw std::runtime_error("File " + filename + " doesn't exist.");
 		}
-
 		std::ifstream file(filename);
 		if (!file.is_open()) {
 			throw std::runtime_error("Failed to open file: " + filename);
 		}
-
 		if (!isServerInfoFileValid(file)) {
 			throw std::runtime_error("Invalid server.info file.");
 		}
-		std::string ip = readIPfromFile(file);
-		std::string port = readPortfromFile(file);
 	}
 	catch (const std::exception& e) {
 		throw; // Re-throw the exception to propagate the error
@@ -434,35 +442,40 @@ std::string openFile(const string& filename) {
 }
 
 
-
-void inputLoop() {
-	while (true) {
-		int responseCode;
-		cout << "MessageU client at your service.\n" << endl;
-		cout << "110) Register\n120) Request for clients list\n130) Request for public key\n140) Request for waiting messages" << endl;
-		cout << "150) Send a text message\n151) Send a request for symmetric key\n152) Send your symmetric key\n0) Exit client\n?" << endl;
-		if (cin >> responseCode) {
-			if (responseCode == ProtocolConstants::Input_Codes::EXIT_CLIENT) {
-				cout << "\nThanks for using MessageU!" << endl;
-				break;
-			}
-			else {
-				handleUserInput(responseCode);
-			}
-		}
-		else { //Non numberical input, clear the input stream!
-			cout << "Non-numberical input deteced. Please enter one of the valid options.\n";
-			cin.clear();
-			cin.ignore(numeric_limits<streamsize>::max(), '\n');
-		}
-		cout << "-----------------------------------------------------" << endl;
-	}
-	return;
-}
-
-
 void main() {
-	inputLoop();
+	boost::asio::io_context io_context;
+	try {
+		std::ifstream file = openFileAndValidate("server.info");
+		std::string ip = readIPfromFile(file);
+		std::string port = readPortfromFile(file);
+		file.close();
+
+		while (true) {
+			int responseCode;
+			cout << "MessageU client at your service.\n" << endl;
+			cout << "110) Register\n120) Request for clients list\n130) Request for public key\n140) Request for waiting messages" << endl;
+			cout << "150) Send a text message\n151) Send a request for symmetric key\n152) Send your symmetric key\n0) Exit client\n?" << endl;
+			if (cin >> responseCode) {
+				if (responseCode == ProtocolConstants::Input_Codes::EXIT_CLIENT) {
+					cout << "\nThanks for using MessageU!" << endl;
+					break;
+				}
+				else {
+					auto socket = connectToServer(ip, port, io_context);
+					handleUserInput(responseCode, socket);
+				}
+			}
+			else { //Non numberical input, clear the input stream!
+				cout << "Non-numberical input deteced. Please enter one of the valid options.\n";
+				cin.clear();
+				cin.ignore(numeric_limits<streamsize>::max(), '\n');
+			}
+			cout << "-----------------------------------------------------" << endl;
+		}
+	}
+	catch (const std::exception& e) {
+		std::cerr << "Error: " << e.what() << "\n";
+	}
 	return;
 }
 
