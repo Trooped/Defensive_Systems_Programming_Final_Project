@@ -110,7 +110,7 @@ namespace ProtocolConstants {
     // General Request Sizes
     constexpr size_t CLIENT_ID_SIZE = 16;           // Size of user ID field (16 bytes)
     constexpr size_t VERSION_SIZE = 1;           // Size of version field (1 byte)
-    constexpr size_t CODE_SIZE = 1;                // Size of operation code field (2 byte)
+    constexpr size_t REQUEST_CODE_SIZE = 1;                // Size of operation code field (2 byte)
     constexpr size_t PAYLOAD_FIELD_SIZE = 4;     // Size of payload field size (4 bytes) - containing the size of the following payload
     constexpr size_t CLIENT_NAME_SIZE = 255;    // Size of client name field (255 ASCII string with \n)
 
@@ -125,6 +125,9 @@ namespace ProtocolConstants {
     constexpr size_t PUBLIC_KEY_FETCH_PAYLOAD_SIZE = CLIENT_ID_SIZE;
     constexpr size_t MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE = CLIENT_ID_SIZE + MESSAGE_TYPE_SIZE + MESSAGE_CONTENT_FIELD_SIZE; // This is the BASIC message payload size, the content will increase it 
 
+    // Response Sizes
+    constexpr size_t RESPONSE_CODE_SIZE = 2;
+    constexpr size_t BASIC_RESPONSE_SIZE = VERSION_SIZE + RESPONSE_CODE_SIZE + PAYLOAD_FIELD_SIZE;
 
     // More constants
     constexpr char DEFAULT_CLIENT_ID[16] = {0}; // Default client ID, to use when registering

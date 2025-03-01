@@ -219,36 +219,13 @@ bool isValidClientName(const std::string& client_name) {
 
 
 
+/*
+void handleRegisterRequest(std::unique_ptr<BaseRequest> request, std::unique_ptr<BaseResponse> response, std::shared_ptr<tcp::socket>& socket) {
+	
 
-void handleRegisterRequest(std::unique_ptr<BaseRequest> request, std::unique_ptr<BaseResponse> response) {
-	string username;
-	cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
-	cin >> username;
-	if (!isValidClientName(username)) {
-		cout << "Invalid client name." << endl;
-		return;
-	}
+	
 
-	// Creating the private and public keys
-	RSAPrivateWrapper rsapriv;
-	std::string pubkey_str = rsapriv.getPublicKey();
-	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey = stringToArray(pubkey_str);
-	std::string priv_base64key = Base64Wrapper::encode(rsapriv.getPrivateKey());
-
-
-	std::array<uint8_t, 16> default_uuid;
-	default_uuid.fill(0xAA);
-
-
-	// Creating the request
-	request = make_unique<RegisterRequest>(
-		default_uuid,
-		ProtocolConstants::CLIENT_VERSION,
-		ProtocolConstants::Request::REGISTER_REQUEST,
-		ProtocolConstants::REGISTER_PAYLOAD_SIZE,
-		username,
-		pubkey
-	);
+	
 
 	// Send the request
 	
@@ -263,15 +240,179 @@ void handleRegisterRequest(std::unique_ptr<BaseRequest> request, std::unique_ptr
 
 
 }
+*/
+
+std::unique_ptr<BaseResponse> parseResponse() {
+	boost::asio::streambuf buffer; //Declare a buffer for the incoming socket bytes, for easy parsing.
+	try {
+		// Read the basic request (user_id, version and operation number).
+		size_t basic_response_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::BASIC_RESPONSE_SIZE));
+		if (basic_response_bytes < ProtocolConstants::BASIC_RESPONSE_SIZE) {
+			throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for version, response code and payload_size fields.");
+		}
+		buffer.commit(ProtocolConstants::BASIC_RESPONSE_SIZE);
+
+		std::istream input_stream(&buffer);
+		uint8_t version;
+		uint16_t response_code;
+		uint32_t payload_size = 0;
+
+		input_stream.read(reinterpret_cast<char*>(&version), ProtocolConstants::VERSION_SIZE);
+		if (input_stream.fail()) {
+			throw std::runtime_error("Failed to read version from the buffer.");
+		}
+		//validateField("user_id", user_id, Protocol::USER_ID_SIZE);
+
+		input_stream.read(reinterpret_cast<char*>(&response_code), ProtocolConstants::RESPONSE_CODE_SIZE);
+		if (input_stream.fail()) {
+			throw std::runtime_error("Failed to read response code from the buffer.");
+		}
+
+		input_stream.read(reinterpret_cast<char*>(&payload_size), ProtocolConstants::PAYLOAD_FIELD_SIZE);
+		if (input_stream.fail()) {
+			throw std::runtime_error("Failed to read response code from the buffer.");
+		}
+
+
+		if (response_code == ProtocolConstants::Response::REGISTRATION_SUCCESS) {
+			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE) {
+				throw std::runtime_error("Payload size has different value than what's expected in register response");
+			}
+
+			size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
+				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
+			}
+			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+
+			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+			input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+
+			return std::make_unique<RegisterResponse>(version, response_code, payload_size, client_id);
+		}
+		else if (response_code == ProtocolConstants::Response::CLIENT_LIST_FETCH_SUCCESS) {
+			size_t num_of_clients = payload_size / (ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::CLIENT_NAME_SIZE);
+
+			// Create a separate class or w/e to store clientid and public key, and then a vector of this class. now - just keep reading!
+
+		}
+		else if (response_code == ProtocolConstants::Response::PUBLIC_KEY_FETCH_SUCCESS) {
+			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::PUBLIC_KEY_SIZE) {
+				throw std::runtime_error("Payload size has different value than what's expected in public key response");
+			}
+
+			size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
+				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
+			}
+			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+			input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+
+			size_t public_key_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::PUBLIC_KEY_SIZE));
+			if (public_key_bytes < ProtocolConstants::PUBLIC_KEY_SIZE) {
+				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for public key");
+			}
+			buffer.commit(ProtocolConstants::PUBLIC_KEY_SIZE);
+			std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
+			input_stream.read(reinterpret_cast<char*>(&public_key), ProtocolConstants::PUBLIC_KEY_SIZE);
+
+			return std::make_unique<PublicKeyResponse>(version, response_code, payload_size, client_id, public_key);
+		}
+		else if (response_code == ProtocolConstants::Response::MESSAGE_SENT_SUCCESS) {
+			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::MESSAGE_ID_SIZE) {
+				throw std::runtime_error("Payload size has different value than what's expected in message sent response");
+			}
+
+			size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
+				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
+			}
+			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+			input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+
+			size_t message_id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::MESSAGE_ID_SIZE));
+			if (message_id_bytes < ProtocolConstants::MESSAGE_ID_SIZE) {
+				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for message_id");
+			}
+			buffer.commit(ProtocolConstants::MESSAGE_ID_SIZE);
+			uint32_t message_id;
+			input_stream.read(reinterpret_cast<char*>(&message_id), ProtocolConstants::MESSAGE_ID_SIZE);
+
+			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
+		}
+		else if (response_code == ProtocolConstants::Response::FETCHING_INCOMING_MESSAGES_SUCCESS) {
+			// Create a separate class or w/e to store everything relevant, and then a vector of this class. now - just keep reading!
+		}
+		else if (response_code == ProtocolConstants::Response::GENERAL_ERROR) {
+			return std::make_unique<ErrorResponse>(version, response_code, payload_size);
+		}
+		else {
+			// TODO should i crash it here or just write an error??
+		}
+	}
+	catch(const std::exception& e){
+		std::cerr << "Error in parseResponse: " << e.what() << "\n";
+		throw;
+	}
+
+
+}
 
 
 void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 	std::unique_ptr<BaseRequest> request;
+	std::unique_ptr<BaseResponse> response;
+
+	// Creating the private and public keys
+	RSAPrivateWrapper rsapriv;
+	std::string pubkey_str = rsapriv.getPublicKey();
+	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey = stringToArray(pubkey_str);
+	std::string priv_base64key = Base64Wrapper::encode(rsapriv.getPrivateKey());
+
+
 
 	switch (operation_code) {
 	case ProtocolConstants::Input_Codes::REGISTER:
 	{
+		string username;
+		cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
+		cin >> username;
+		if (!isValidClientName(username)) {
+			cout << "Invalid client name." << endl;
+			return;
+		}
 
+
+		std::array<uint8_t, 16> default_uuid;
+		default_uuid.fill(0xAA);
+
+
+		// Creating the request
+		request = make_unique<RegisterRequest>(
+			default_uuid,
+			ProtocolConstants::CLIENT_VERSION,
+			ProtocolConstants::Request::REGISTER_REQUEST,
+			ProtocolConstants::REGISTER_PAYLOAD_SIZE,
+			username,
+			pubkey
+		);
+
+		// Send the request
+		//socket!!!!!!!!!!!!!!! request->sendRequest();
+		request->sendRequest(*socket); // TODO is it correct?
+
+
+		// Receive a response
+		response = parseResponse();
+
+
+		// Enter the clientname, the ID and the private key in base 64 into the me.info file
+
+
+
+		//handleRegisterRequest(request, response, socket);
 		break;
 	}
 	case ProtocolConstants::Input_Codes::CLIENTS_LIST:
@@ -374,7 +515,6 @@ std::string readPortfromFile(std::string& line) {
 	return line.substr(separator + 1);
 }
 
-//NEED TO UPDATE THIS FUCKING FUNCTION
 std::string validate_server_file(std::ifstream& file) {
 	std::string line;
 
