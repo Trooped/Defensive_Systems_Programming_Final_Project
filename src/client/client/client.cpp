@@ -176,10 +176,81 @@ void textMessage::sendRequest(tcp::socket& socket) {
 BaseResponse::BaseResponse(uint8_t version, uint16_t response_code, uint32_t payload_size)
 	: version{ version }, response_code{ response_code }, payload_size{ payload_size } { }
 
+
+
 RegisterResponse::RegisterResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id)
 	: BaseResponse(version, response_code, payload_size), client_id(client_id) { }
 
-// handle the client list response!!!!!!!!!!!!!!
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> RegisterResponse::getClientID() {
+	return client_id;
+}
+
+
+
+ClientsListResponse::ClientsListResponse(uint8_t version, uint16_t response_code, uint32_t payload_size)
+	: BaseResponse(version, response_code, payload_size) { }
+
+
+//////////////////////////////
+void ClientHandler::addClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+	const std::string& client_name)
+{
+	clients[client_id] = ClientInfo(client_name);
+};
+
+bool ClientHandler::setPublicKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+	const std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& public_key)
+{
+	auto it = clients.find(client_id);
+	if (it != clients.end()) {
+		it->second.public_key = public_key;
+		return true;
+	}
+	return false; // Client not found
+};
+
+bool ClientHandler::setSymmetricKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+	const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key)
+{
+	auto it = clients.find(client_id);
+	if (it != clients.end()) {
+		it->second.symmetric_key = symmetric_key;
+		return true;
+	}
+	return false; // Client not found
+};
+
+std::optional<ClientInfo> ClientHandler::getClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id) const
+{
+	auto it = clients.find(client_id);
+	if (it != clients.end()) {
+		return it->second;
+	}
+	return std::nullopt; // Client not found
+};
+
+// TODO for debugging purposes. DELETE THIS LATERRRRRRRRRRRRRRRR
+void ClientHandler::printClients() const
+{
+	std::cout << "Clients List:\n";
+	for (const auto& pair : clients) {
+		std::cout << "- Client Name: " << pair.second.client_name << "\n";
+		if (pair.second.public_key.has_value()) {
+			std::cout << "  - Public Key: [SET]\n";
+		}
+		else {
+			std::cout << "  - Public Key: [NOT SET]\n";
+		}
+		if (pair.second.symmetric_key.has_value()) {
+			std::cout << "  - Symmetric Key: [SET]\n";
+		}
+		else {
+			std::cout << "  - Symmetric Key: [NOT SET]\n";
+		}
+	}
+};
+
+////////////////////////////////////
 
 PublicKeyResponse::PublicKeyResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey)
 	: BaseResponse(version, response_code, payload_size), client_id(client_id), pubkey(pubkey) { }
@@ -187,7 +258,8 @@ PublicKeyResponse::PublicKeyResponse(uint8_t version, uint16_t response_code, ui
 MessageSentResponse::MessageSentResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint32_t message_id)
 	: BaseResponse(version, response_code, payload_size), client_id(client_id), message_id(message_id) { }
 
-// handle the waiting messages fetch response!!!!!!!!!!!!!!!!!!!!!!
+WaitingMessagesFetchResponse::WaitingMessagesFetchResponse(uint8_t version, uint16_t response_code, uint32_t payload_size)
+	: BaseResponse(version, response_code, payload_size) { }
 
 ErrorResponse::ErrorResponse(uint8_t version, uint16_t response_code, uint32_t payload_size)
 	: BaseResponse(version, response_code, payload_size) { }
@@ -216,31 +288,6 @@ bool isValidClientName(const std::string& client_name) {
 	return true;
 }
 
-
-
-
-/*
-void handleRegisterRequest(std::unique_ptr<BaseRequest> request, std::unique_ptr<BaseResponse> response, std::shared_ptr<tcp::socket>& socket) {
-	
-
-	
-
-	
-
-	// Send the request
-	
-	//socket!!!!!!!!!!!!!!! request->sendRequest();
-	
-
-	// Receive a response
-	//************ MAYBE CREATE A GENERIC RESPONSE POINTER IN THE HANDLEUSERINPUT AND THEN REUSE IT THROUGH ALL OF THE FUNCTIONS
-
-
-	// Enter the clientname, the ID and the private key in base 64 into the me.info file
-
-
-}
-*/
 
 std::unique_ptr<BaseResponse> parseResponse() {
 	boost::asio::streambuf buffer; //Declare a buffer for the incoming socket bytes, for easy parsing.
@@ -293,8 +340,38 @@ std::unique_ptr<BaseResponse> parseResponse() {
 		else if (response_code == ProtocolConstants::Response::CLIENT_LIST_FETCH_SUCCESS) {
 			size_t num_of_clients = payload_size / (ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::CLIENT_NAME_SIZE);
 
-			// Create a separate class or w/e to store clientid and public key, and then a vector of this class. now - just keep reading!
+			// Access the singleton global ClientHandler instance
+			ClientHandler& handler = ClientHandler::getInstance();
 
+			cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
+
+			for (int i = 0; i < num_of_clients; i++) {
+				size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+				if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
+					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
+				}
+				buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+				std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+				input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+
+				//client_ids.push_back(client_id);
+
+				size_t name_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_NAME_SIZE));
+				if (name_bytes < ProtocolConstants::CLIENT_NAME_SIZE) {
+					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client name");
+				}
+				buffer.commit(ProtocolConstants::CLIENT_NAME_SIZE);
+				std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_name_arr;
+				input_stream.read(reinterpret_cast<char*>(&client_name_arr), ProtocolConstants::CLIENT_ID_SIZE);
+
+				std::string client_name(client_name_arr.begin(), client_name_arr.end()); // Copy the array from uint8_t form to char array (to string).
+				//client_names.push_back(client_name);
+
+				handler.addClient(client_id, client_name);
+				cout << i + 1 << ". " << client_name << endl;
+			}
+
+			return std::make_unique<ClientsListResponse>(version, response_code, payload_size);
 		}
 		else if (response_code == ProtocolConstants::Response::PUBLIC_KEY_FETCH_SUCCESS) {
 			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::PUBLIC_KEY_SIZE) {
@@ -343,7 +420,102 @@ std::unique_ptr<BaseResponse> parseResponse() {
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
 		}
 		else if (response_code == ProtocolConstants::Response::FETCHING_INCOMING_MESSAGES_SUCCESS) {
-			// Create a separate class or w/e to store everything relevant, and then a vector of this class. now - just keep reading!
+			// Access the singleton global ClientHandler instance
+			ClientHandler& handler = ClientHandler::getInstance();
+
+			/*
+			From: <username>
+			Content:
+			<content>
+			.
+			.
+			.
+			-----<EOM>-----
+			\n
+			*/
+			cout << "Printing the incoming messages: " << endl;
+			while (true) {
+				size_t message_header_bytes = boost::asio::read(socket, buffer, boost::asio::transfer_exactly(ProtocolConstants::MESSAGE_HEADER_SIZE));
+				if (message_header_bytes == 0) {
+					std::cout << "No more messages. Stopping.\n";
+					break;
+				}
+				else if (message_header_bytes != ProtocolConstants::MESSAGE_HEADER_SIZE){
+					throw std::runtime_error("Received invalid message header.");
+				}
+
+				buffer.commit(ProtocolConstants::MESSAGE_HEADER_SIZE);
+				
+				std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+				uint32_t message_id;
+				uint8_t message_type;
+				uint32_t message_content_size;
+
+				input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+				if (input_stream.fail()) {
+					throw std::runtime_error("Failed to read sending client_id from the buffer.");
+				}
+				//validateField("user_id", user_id, Protocol::USER_ID_SIZE); // TODO delete it or make this version in this maman!!!
+
+				input_stream.read(reinterpret_cast<char*>(&message_id), ProtocolConstants::MESSAGE_ID_SIZE);
+				if (input_stream.fail()) {
+					throw std::runtime_error("Failed to read message_id from the buffer.");
+				}
+
+				input_stream.read(reinterpret_cast<char*>(&message_type), ProtocolConstants::MESSAGE_TYPE_SIZE);
+				if (input_stream.fail()) {
+					throw std::runtime_error("Failed to read message_type from the buffer.");
+				}
+
+				input_stream.read(reinterpret_cast<char*>(&message_content_size), ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE);
+				if (input_stream.fail()) {
+					throw std::runtime_error("Failed to read message content size from the buffer.");
+				}
+
+
+				// Read the message content from the communication
+				size_t message_content_bytes = boost::asio::read(socket, buffer, boost::asio::transfer_exactly(message_content_size));
+				if (message_content_bytes != message_content_size) {
+					throw std::runtime_error("Mismatch between message content size and message content");
+				}
+
+				buffer.commit(message_content_size);
+
+				std::vector<uint8_t> message_content(message_content_size);
+				input_stream.read(reinterpret_cast<char*>(message_content.data()), message_content_size);
+
+				// Printing the message
+				cout << "From: " << handler.getClient(client_id)->client_name << endl; 
+				cout << "Content: " << endl;
+				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
+					cout << "Request For Symmetrical Key" << endl;
+				}
+				else if (message_type == ProtocolConstants::Message::SEND_SYMMETRICAL_KEY) {
+					cout << "Symmetrical Key Received" << endl;
+
+					// Copying the vector into an array of uint8_t for the symmetric key
+					std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key = {};  // Zero-initialize
+					std::copy_n(message_content.begin(), std::min(message_content.size(), ProtocolConstants::SYMMETRIC_KEY_SIZE), symmetric_key.begin());
+
+					// Saves the symmetric key for this client.
+					handler.setSymmetricKey(client_id, symmetric_key);
+				}
+				else if (message_type == ProtocolConstants::Message::SEND_TEXT_MESSAGE) {
+					// TODO need to decrypt the message using a symmetrical key^ such as above.
+					// if there's no symmetrical key or it isn't valid, we need to write "can't decrypt message".
+					
+					//DO IT USING A IF ELSE AND FOR THE ELSE JUST PRINT AN ERRORMESSAGE!
+
+				}
+				cout << "-----<EOM>-----" << endl;
+				cout << "\n" << endl;
+
+				// TODO add a check if the payload size is correct here? or it's unneccsarily complicated?????????????????????
+				//return std::make_unique<ErrorResponse>(version, response_code, payload_size);
+
+				
+			}
+			return std::make_unique<WaitingMessagesFetchResponse>(version, response_code, payload_size);
 		}
 		else if (response_code == ProtocolConstants::Response::GENERAL_ERROR) {
 			return std::make_unique<ErrorResponse>(version, response_code, payload_size);
@@ -358,6 +530,19 @@ std::unique_ptr<BaseResponse> parseResponse() {
 	}
 
 
+}
+
+
+bool CreateClientInfoFile(std::string filename, std::string username, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::string private_key_base64) {
+	std::ofstream file(filename);
+	if (!file.is_open()) {
+		throw std::runtime_error("Failed to open file: " + filename);
+	} // TODO maybe just return false with an error message? omgggggggg
+
+	file << username << "\n";
+	//file << client_id << "\n"; TODO how to save and write thissssssss it needs to be ascii where every 2 chars are an hex value of 8 bits.
+	file << private_key_base64;
+	return true;
 }
 
 
@@ -399,20 +584,31 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			pubkey
 		);
 
-		// Send the request
-		//socket!!!!!!!!!!!!!!! request->sendRequest();
+		// Send the registration request
 		request->sendRequest(*socket); // TODO is it correct?
-
 
 		// Receive a response
 		response = parseResponse();
+		
+		// TODO add a check if the response is correct AND isn't an error.
 
+		const string filename = "me.info";
+		if (doesFileExist(filename)) {
+			cerr << "Warning: me.info file already exists, cancelling sign up operation." << endl;
+			return;
+		}
 
-		// Enter the clientname, the ID and the private key in base 64 into the me.info file
+		// Getting the client_id from the RegisterResponse class
+		if (auto* regResponse = dynamic_cast<RegisterResponse*>(response.get())) {
+			auto clientID = regResponse->getClientID();
+			CreateClientInfoFile(filename, username, clientID, priv_base64key);
+		}
+		else {
+			cerr << "Warning: me.info file already exists, cancelling sign up operation." << endl;
+			return; // TODO write a different error here.
+		}
 
-
-
-		//handleRegisterRequest(request, response, socket);
+		cout << "New client details are saved in me.info file." << endl;
 		break;
 	}
 	case ProtocolConstants::Input_Codes::CLIENTS_LIST:
@@ -540,26 +736,6 @@ std::string validate_server_file(std::ifstream& file) {
 
 	return line;
 }
-
-/*
-std::ifstream openFileAndValidate(const string& filename) {
-	try {
-		if (!doesFileExist(filename)) {
-			throw std::runtime_error("File " + filename + " doesn't exist.");
-		}
-		std::ifstream file(filename);
-		if (!file.is_open()) {
-			throw std::runtime_error("Failed to open file: " + filename);
-		}
-		if (!isServerInfoFileValid(file)) {
-			throw std::runtime_error("Invalid server.info file.");
-		}
-	}
-	catch (const std::exception& e) {
-		throw; // Re-throw the exception to propagate the error
-	}
-}
-*/
 
 
 int main() {

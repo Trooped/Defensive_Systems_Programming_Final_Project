@@ -39,6 +39,8 @@ The server will do the operation and respond with the following statuses:
 #include <fstream>
 #include <filesystem>
 #include <vector>
+#include <optional>
+#include <unordered_map>
 
 #include "cryptlib.h"
 #include <osrng.h>
@@ -128,6 +130,8 @@ namespace ProtocolConstants {
     // Response Sizes
     constexpr size_t RESPONSE_CODE_SIZE = 2;
     constexpr size_t BASIC_RESPONSE_SIZE = VERSION_SIZE + RESPONSE_CODE_SIZE + PAYLOAD_FIELD_SIZE;
+    constexpr size_t MESSAGE_HEADER_SIZE = CLIENT_ID_SIZE + MESSAGE_ID_SIZE + MESSAGE_TYPE_SIZE + MESSAGE_CONTENT_FIELD_SIZE;
+
 
     // More constants
     constexpr char DEFAULT_CLIENT_ID[16] = {0}; // Default client ID, to use when registering
@@ -230,16 +234,61 @@ protected:
     uint32_t payload_size;
 public:
     BaseResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
+    virtual ~BaseResponse() = default;
 };
 
 class RegisterResponse : public BaseResponse {
+protected:
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
 public:
     RegisterResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id);
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientID();
 };
 
 class ClientsListResponse : public BaseResponse {
-    // Do this either with 2 vectors for client_ids and client_names, or as only one client_id and client_name, and then create a separate class that'll handle the vectors... figure it out.
+    ClientsListResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
+};
+
+struct ClientInfo {
+    std::string client_name;
+    std::optional<std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>> public_key;  // Optional field
+    std::optional<std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>> symmetric_key;  // Optional field
+
+    ClientInfo(const std::string& name) : client_name(name) {}
+};
+
+class ClientHandler {
+    std::unordered_map<std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>, ClientInfo> clients;
+    // Private constructor for single instance
+    ClientHandler() = default;
+public:
+    // Prevent copying
+    ClientHandler(const ClientHandler&) = delete;
+    ClientHandler& operator=(const ClientHandler&) = delete;
+
+    // Get Single Instance
+    static ClientHandler& getInstance() {
+        static ClientHandler instance;
+        return instance;
+    }
+
+    // Add Client (Only ID + Name Initially)
+    void addClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+        const std::string& client_name);
+
+    // Set Public Key
+    bool setPublicKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+        const std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& public_key);
+
+    // Set Symmetric Key
+    bool setSymmetricKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+        const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key);
+
+    // Get Client (Returns std::optional)
+    std::optional<ClientInfo> getClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id) const;
+
+    // Print All Clients (Debugging)
+    void printClients() const;
 };
 
 class PublicKeyResponse : public BaseResponse {
@@ -259,8 +308,7 @@ public:
 
 
 class WaitingMessagesFetchResponse : public BaseResponse {
-    // same as the clientslist, how should i do that?
-
+    WaitingMessagesFetchResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
 class ErrorResponse : public BaseResponse {
