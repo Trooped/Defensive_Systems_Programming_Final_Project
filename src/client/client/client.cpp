@@ -539,11 +539,65 @@ bool CreateClientInfoFile(std::string filename, std::string username, std::array
 		throw std::runtime_error("Failed to open file: " + filename);
 	} // TODO maybe just return false with an error message? omgggggggg
 
+
+
 	file << username << "\n";
-	//file << client_id << "\n"; TODO how to save and write thissssssss it needs to be ascii where every 2 chars are an hex value of 8 bits.
+	file << uuidToString(client_id) << "\n";
 	file << private_key_base64;
 	return true;
 }
+
+
+
+// TODO error handling, what if there isn't a client id there? maybe we need to check if it's a valid one?
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> fetchClientIdFromFile() {
+	std::ifstream file("me.info");
+	if (!file.is_open()) {
+		throw std::runtime_error("Failed to open me.info");
+	} // TODO maybe just return false with an error message? omgggggggg
+
+	std::string name;
+	getline(file, name);
+
+	std::string client_id_str;
+	getline(file, client_id_str);
+
+	// TODO does it also take in the \n at the end???????
+
+	return stringToUUID(client_id_str);
+}
+
+
+
+std::string uuidToString(const std::array < uint8_t, ProtocolConstants::CLIENT_ID_SIZE > & client_id) {
+	std::stringstream ss;
+	ss << std::hex << std::setfill('0'); // Format as hex with leading zeros
+
+	for (size_t i = 0; i < client_id.size(); ++i) {
+		ss << std::setw(2) << static_cast<int>(client_id[i]); // Print byte as hex
+	}
+
+	return ss.str();
+}
+
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToUUID(const std::string& client_id_string) {
+	std::array<uint8_t, 16> uuid{};
+
+	if (client_id_string.length() != 32) {  // Ensure it's exactly 16 bytes (32 hex characters)
+		throw std::invalid_argument("Invalid UUID string length");
+	}
+
+	for (size_t i = 0; i < 16; ++i) {
+		std::stringstream ss;
+		ss << std::hex << client_id_string.substr(i * 2, 2); // Extract 2 characters
+		int value;
+		ss >> value;
+		uuid[i] = static_cast<uint8_t>(value); // Convert hex to uint8_t
+	}
+
+	return uuid;
+}
+
 
 
 void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
@@ -613,16 +667,45 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 	}
 	case ProtocolConstants::Input_Codes::CLIENTS_LIST:
 	{
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+		client_id = fetchClientIdFromFile();
+		// TODO handle the case where there isn't a client id / there isn't a VALID one!!!
+
+		// Creating the request
+		request = make_unique<basicRequest>(
+			client_id,
+			ProtocolConstants::CLIENT_VERSION,
+			ProtocolConstants::Request::CLIENTS_LIST_REQUEST,
+			ProtocolConstants::CLIENT_LIST_AND_FETCH_MESSAGES_PAYLOAD_SIZE
+		);
+
+		// Managing the response
+		response = parseResponse();
 
 		break;
 	}
 	case ProtocolConstants::Input_Codes::FETCH_OTHER_CLIENT_PUBLIC_KEY:
 	{
+		// TODO add a search by name function to the clientHandler class, then ask the user for an input.
+		// is it what we're supposed to do here? kinda odd that there aren't such useful instructions for this specific request.
 
 		break;
 	}
 	case ProtocolConstants::Input_Codes::FETCH_WAITING_MESSAGES:
 	{
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+		client_id = fetchClientIdFromFile();
+		// TODO handle the case where there isn't a client id / there isn't a VALID one!!!
+
+		request = make_unique<basicRequest>(
+			client_id,
+			ProtocolConstants::CLIENT_VERSION,
+			ProtocolConstants::Request::FETCH_WAITING_MESSAGES_REQUEST,
+			ProtocolConstants::CLIENT_LIST_AND_FETCH_MESSAGES_PAYLOAD_SIZE
+		);
+
+		// Managing the response
+		response = parseResponse();
 
 		break;
 	}
