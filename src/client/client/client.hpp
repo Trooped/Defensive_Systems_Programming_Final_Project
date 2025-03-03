@@ -69,7 +69,7 @@ namespace ProtocolConstants {
         FETCH_OTHER_CLIENT_PUBLIC_KEY = 130,
         FETCH_WAITING_MESSAGES = 140,
         SEND_TEXT_MESSAGE_CODE = 150,
-        SEND_REQUEST_SYMMETRIC_KEY = 151,
+        REQUEST_SYMMETRIC_KEY = 151,
         SEND_SYMMETRIC_KEY = 152,
         EXIT_CLIENT = 0
     };
@@ -120,6 +120,7 @@ namespace ProtocolConstants {
     constexpr size_t MESSAGE_TYPE_SIZE = 1;    // Size of Message type field size
     constexpr size_t MESSAGE_CONTENT_FIELD_SIZE = 4;    // Size of message content field (describing the size of the following message content)
     constexpr size_t MESSAGE_ID_SIZE = 4;
+    constexpr size_t MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE = 0;
 
     // Request Payload Sizes
     constexpr size_t REGISTER_PAYLOAD_SIZE = CLIENT_NAME_SIZE + PUBLIC_KEY_SIZE;
@@ -283,6 +284,8 @@ public:
     // Set Symmetric Key
     bool setSymmetricKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
         const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key);
+
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientIDByName(const std::string& name);
 
     // Get Client (Returns std::optional)
     std::optional<ClientInfo> getClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id) const;

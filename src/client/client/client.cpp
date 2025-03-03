@@ -220,6 +220,15 @@ bool ClientHandler::setSymmetricKey(const std::array<uint8_t, ProtocolConstants:
 	return false; // Client not found
 };
 
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientIDByName(const std::string& name) {
+	for (auto& it : clients) {
+		if (it.second.client_name == "name") {
+			return it.first;
+		}
+	}
+	// return ProtocolConstants::DEFAULT_CLIENT_ID; TODO return some default value or just throw an error.
+}
+
 std::optional<ClientInfo> ClientHandler::getClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id) const
 {
 	auto it = clients.find(client_id);
@@ -501,10 +510,20 @@ std::unique_ptr<BaseResponse> parseResponse() {
 					handler.setSymmetricKey(client_id, symmetric_key);
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_TEXT_MESSAGE) {
-					// TODO need to decrypt the message using a symmetrical key^ such as above.
-					// if there's no symmetrical key or it isn't valid, we need to write "can't decrypt message".
-					
-					//DO IT USING A IF ELSE AND FOR THE ELSE JUST PRINT AN ERRORMESSAGE!
+					// TODO if there's no symmetrical key or *it isn't valid* (how to check that???), we need to write "can't decrypt message".
+					if ((handler.getClient(client_id)->symmetric_key).has_value()) {
+						// Using the symmetric key to encrypt the text message.
+						std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(client_id)->symmetric_key.value();
+						AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
+
+						std::string message_content_string(message_content.begin(), message_content.end());
+						std::string decrypted_text = aes.decrypt(message_content_string.c_str(), message_content_string.length());
+
+						cout << decrypted_text << endl; // TODO is it enough?
+					}
+					else {
+						cout << "Can't decrypt message.\n";
+					}
 
 				}
 				cout << "-----<EOM>-----" << endl;
@@ -548,7 +567,6 @@ bool CreateClientInfoFile(std::string filename, std::string username, std::array
 }
 
 
-
 // TODO error handling, what if there isn't a client id there? maybe we need to check if it's a valid one?
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> fetchClientIdFromFile() {
 	std::ifstream file("me.info");
@@ -562,9 +580,25 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> fetchClientIdFromFile() {
 	std::string client_id_str;
 	getline(file, client_id_str);
 
-	// TODO does it also take in the \n at the end???????
-
 	return stringToUUID(client_id_str);
+}
+
+std::string fetchPrivateKeyFromFile() {
+	std::ifstream file("me.info");
+	if (!file.is_open()) {
+		throw std::runtime_error("Failed to open me.info");
+	} // TODO maybe just return false with an error message? omgggggggg
+
+	std::string name;
+	getline(file, name);
+
+	std::string client_id_str;
+	getline(file, client_id_str);
+
+	std::string private_key;
+	getline(file, private_key);
+
+	return private_key; // Still in base 64.
 }
 
 
@@ -599,10 +633,34 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToUUID(const std::s
 }
 
 
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
+	std::string dest_client_name;
+	cout << "Please enter the message destination's client's name: ";
+	cin >> dest_client_name;
+	if (!isValidClientName(dest_client_name)) { // TODO add a check if the client name exists in our list!!!!!!!!!!!!!!!!!!
+		cout << "Invalid client name." << endl;
+		return;
+	}
 
-void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
-	std::unique_ptr<BaseRequest> request;
-	std::unique_ptr<BaseResponse> response;
+	ClientHandler& handler = ClientHandler::getInstance();
+
+	return handler.getClientIDByName(dest_client_name);
+}
+
+
+void clientRegister(std::shared_ptr<tcp::socket>& socket) {
+	string username;
+	cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
+	cin >> username;
+	if (!isValidClientName(username)) {
+		cout << "Invalid client name." << endl;
+		return;
+	}
+
+
+	std::array<uint8_t, 16> default_uuid;
+	default_uuid.fill(0xAA);
+
 
 	// Creating the private and public keys
 	RSAPrivateWrapper rsapriv;
@@ -611,58 +669,54 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 	std::string priv_base64key = Base64Wrapper::encode(rsapriv.getPrivateKey());
 
 
+	// Creating the request
+	std::unique_ptr<BaseRequest> request = make_unique<RegisterRequest>(
+		default_uuid,
+		ProtocolConstants::CLIENT_VERSION,
+		ProtocolConstants::Request::REGISTER_REQUEST,
+		ProtocolConstants::REGISTER_PAYLOAD_SIZE,
+		username,
+		pubkey
+	);
+
+	// Send the registration request
+	request->sendRequest(*socket); // TODO is it correct?
+
+	// Receive a response
+	std::unique_ptr<BaseResponse> response = parseResponse();
+
+	// TODO add a check if the response is correct AND isn't an error.
+
+	const string filename = "me.info";
+	if (doesFileExist(filename)) {
+		cerr << "Warning: me.info file already exists, cancelling sign up operation." << endl;
+		return;
+	}
+
+	// Getting the client_id from the RegisterResponse class
+	if (auto* regResponse = dynamic_cast<RegisterResponse*>(response.get())) {
+		auto clientID = regResponse->getClientID();
+		CreateClientInfoFile(filename, username, clientID, priv_base64key);
+	}
+	else {
+		cerr << "Warning: me.info file already exists, cancelling sign up operation." << endl;
+		return; // TODO write a different error here.
+	}
+
+	cout << "New client details are saved in me.info file." << endl;
+
+
+}
+
+
+void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
+	std::unique_ptr<BaseRequest> request;
+	std::unique_ptr<BaseResponse> response;
 
 	switch (operation_code) {
 	case ProtocolConstants::Input_Codes::REGISTER:
 	{
-		string username;
-		cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
-		cin >> username;
-		if (!isValidClientName(username)) {
-			cout << "Invalid client name." << endl;
-			return;
-		}
-
-
-		std::array<uint8_t, 16> default_uuid;
-		default_uuid.fill(0xAA);
-
-
-		// Creating the request
-		request = make_unique<RegisterRequest>(
-			default_uuid,
-			ProtocolConstants::CLIENT_VERSION,
-			ProtocolConstants::Request::REGISTER_REQUEST,
-			ProtocolConstants::REGISTER_PAYLOAD_SIZE,
-			username,
-			pubkey
-		);
-
-		// Send the registration request
-		request->sendRequest(*socket); // TODO is it correct?
-
-		// Receive a response
-		response = parseResponse();
-		
-		// TODO add a check if the response is correct AND isn't an error.
-
-		const string filename = "me.info";
-		if (doesFileExist(filename)) {
-			cerr << "Warning: me.info file already exists, cancelling sign up operation." << endl;
-			return;
-		}
-
-		// Getting the client_id from the RegisterResponse class
-		if (auto* regResponse = dynamic_cast<RegisterResponse*>(response.get())) {
-			auto clientID = regResponse->getClientID();
-			CreateClientInfoFile(filename, username, clientID, priv_base64key);
-		}
-		else {
-			cerr << "Warning: me.info file already exists, cancelling sign up operation." << endl;
-			return; // TODO write a different error here.
-		}
-
-		cout << "New client details are saved in me.info file." << endl;
+		clientRegister(socket);
 		break;
 	}
 	case ProtocolConstants::Input_Codes::CLIENTS_LIST:
@@ -679,6 +733,8 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			ProtocolConstants::CLIENT_LIST_AND_FETCH_MESSAGES_PAYLOAD_SIZE
 		);
 
+		request->sendRequest(*socket);
+
 		// Managing the response
 		response = parseResponse();
 
@@ -686,8 +742,23 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 	}
 	case ProtocolConstants::Input_Codes::FETCH_OTHER_CLIENT_PUBLIC_KEY:
 	{
-		// TODO add a search by name function to the clientHandler class, then ask the user for an input.
-		// is it what we're supposed to do here? kinda odd that there aren't such useful instructions for this specific request.
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+		client_id = fetchClientIdFromFile();
+		// TODO handle the case where there isn't a client id / there isn't a VALID one!!!
+
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
+
+		request = make_unique<PublicKeyRequest>(
+			client_id,
+			ProtocolConstants::CLIENT_VERSION,
+			ProtocolConstants::Request::FETCH_OTHER_CLIENT_PUBLIC_KEY_REQUEST,
+			ProtocolConstants::PUBLIC_KEY_FETCH_PAYLOAD_SIZE
+		);
+
+		request->sendRequest(*socket);
+
+		// Managing the response
+		response = parseResponse();
 
 		break;
 	}
@@ -704,6 +775,8 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			ProtocolConstants::CLIENT_LIST_AND_FETCH_MESSAGES_PAYLOAD_SIZE
 		);
 
+		request->sendRequest(*socket);
+
 		// Managing the response
 		response = parseResponse();
 
@@ -711,16 +784,129 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 	}
 	case ProtocolConstants::Input_Codes::SEND_TEXT_MESSAGE_CODE:
 	{
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+		client_id = fetchClientIdFromFile();
+		// TODO handle the case where there isn't a client id / there isn't a VALID one!!!
+
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
+		// TODO add a check if it's valid
+
+		std::string text_input;
+		cout << "Please enter the required text message to send: \n";
+		cin >> text_input; // TODO limit it to some specific size somehow
+
+		ClientHandler& handler = ClientHandler::getInstance();
+
+		if ((handler.getClient(dest_client_id)->symmetric_key).has_value()) {
+			// Using the symmetric key to encrypt the text message.
+			std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(dest_client_id)->symmetric_key.value();
+			AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
+			std::string ciphertext = aes.encrypt(text_input.c_str(), text_input.length());
+
+			request = make_unique<symmetricKeyRequestMessage>(
+				client_id,
+				ProtocolConstants::CLIENT_VERSION,
+				ProtocolConstants::Request::SEND_MESSAGE,
+				ProtocolConstants::MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE + ciphertext.length(),
+				dest_client_id,
+				ProtocolConstants::Message::SEND_TEXT_MESSAGE,
+				ciphertext.length(),
+				ciphertext
+			);
+
+			request->sendRequest(*socket);
+		}
+		else {
+			cout << "You need a symmetric key of a destination client to send him a text message.\n";
+			return;
+		}
+
+		// Managing the response
+		response = parseResponse();
 
 		break;
 	}
-	case ProtocolConstants::Input_Codes::SEND_REQUEST_SYMMETRIC_KEY:
+	case ProtocolConstants::Input_Codes::REQUEST_SYMMETRIC_KEY:
 	{
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+		client_id = fetchClientIdFromFile();
+		// TODO handle the case where there isn't a client id / there isn't a VALID one!!!
+
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
+		// TODO add a check if it's valid
+
+		request = make_unique<symmetricKeyRequestMessage>(
+			client_id,
+			ProtocolConstants::CLIENT_VERSION,
+			ProtocolConstants::Request::SEND_MESSAGE,
+			ProtocolConstants::MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE,
+			dest_client_id,
+			ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY,
+			ProtocolConstants::MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE
+		);
+
+		request->sendRequest(*socket);
+
+		// Managing the response
+		response = parseResponse();
 
 		break;
 	}
 	case ProtocolConstants::Input_Codes::SEND_SYMMETRIC_KEY:
 	{
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+		client_id = fetchClientIdFromFile();
+		// TODO handle the case where there isn't a client id / there isn't a VALID one!!!
+
+		std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
+		// TODO add a check if it's valid
+
+
+		ClientHandler& handler = ClientHandler::getInstance();
+
+		// Generating a symmetric key (if there isn't one)
+		if (!(handler.getClient(dest_client_id)->symmetric_key).has_value()) {
+			unsigned char symmetric_key[ProtocolConstants::SYMMETRIC_KEY_SIZE];
+			AESWrapper aes(AESWrapper::GenerateKey(symmetric_key, ProtocolConstants::SYMMETRIC_KEY_SIZE), ProtocolConstants::SYMMETRIC_KEY_SIZE);
+
+			// Encryptying the symmetric key using the destination client's public key
+			if ((handler.getClient(dest_client_id)->public_key).has_value()) {
+				std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> dest_pub_key_arr = (handler.getClient(dest_client_id)->public_key).value();
+				std::string dest_client_public_key = std::string(dest_pub_key_arr.begin(), dest_pub_key_arr.end());
+
+				RSAPublicWrapper rsapub(dest_client_public_key);
+				std::string encrypted_symmetric_key = rsapub.encrypt((const char*)symmetric_key, sizeof(symmetric_key));
+
+				// Copying the char[] array symmetric key into uint8_t array for easy sending and storage.
+				std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symm_key_arr;
+				std::copy(std::begin(symmetric_key), std::end(symmetric_key), symm_key_arr.begin());
+
+				handler.setSymmetricKey(dest_client_id, symm_key_arr); // Setting the symmetric key for the target client
+
+				request = make_unique<symmetricKeySendMessage>(
+					client_id,
+					ProtocolConstants::CLIENT_VERSION,
+					ProtocolConstants::Request::SEND_MESSAGE,
+					ProtocolConstants::MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE,
+					dest_client_id,
+					ProtocolConstants::Message::SEND_SYMMETRICAL_KEY,
+					encrypted_symmetric_key
+				);
+
+				request->sendRequest(*socket);
+			}
+			else {
+				cout << "You need the public key of the destination client to send him a symmetric key.\n";
+				return;
+			}
+		}
+		else {
+			cout << "You already have a symmetric key with this client.\n";
+			return;
+		}	
+
+		// Managing the response
+		response = parseResponse();
 
 		break;
 	}
@@ -836,12 +1022,6 @@ int main() {
 		std::string ip = readIPfromFile(info_line);
 		std::string port = readPortfromFile(info_line);
 		file.close();
-
-		//testinggggggggggg
-		cout << ip << endl;
-		cout << port << endl;
-
-		////////////////////
 
 		while (true) {
 			int responseCode;
