@@ -19,8 +19,12 @@ void BaseRequest::sendRequest(tcp::socket& socket) const {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 	
 	boost::asio::write(socket, buffer);
 }
@@ -34,8 +38,12 @@ void RegisterRequest::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	// Pad the client name with '\0'
 	while (client_name.length() < 255) {
@@ -58,8 +66,12 @@ void basicRequest::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	boost::asio::write(socket, buffer);
 }
@@ -72,8 +84,12 @@ void PublicKeyRequest::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
 
@@ -89,13 +105,18 @@ void Message::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
 	request_stream.put(message_type);
 
-	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+	uint32_t content_size_con = boost::endian::native_to_little(message_content_size);
+	request_stream.write(reinterpret_cast<const char*>(&content_size_con), sizeof(message_content_size));
 
 	boost::asio::write(socket, buffer);
 }
@@ -108,13 +129,18 @@ void symmetricKeyRequestMessage::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
 	request_stream.put(message_type);
 
-	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+	uint32_t content_size_con = boost::endian::native_to_little(message_content_size);
+	request_stream.write(reinterpret_cast<const char*>(&content_size_con), sizeof(message_content_size));
 
 	// No content sent
 
@@ -130,13 +156,18 @@ void symmetricKeySendMessage::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
 	request_stream.put(message_type);
 
-	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+	uint32_t content_size_con = boost::endian::native_to_little(message_content_size);
+	request_stream.write(reinterpret_cast<const char*>(&content_size_con), sizeof(message_content_size));
 	
 	request_stream.write(reinterpret_cast<const char*>(&encrypted_symmetric_key), sizeof(encrypted_symmetric_key));
 
@@ -151,15 +182,20 @@ void textMessage::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
 	request_stream.put(message_type);
 
-	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+	uint32_t content_size_con = boost::endian::native_to_little(message_content_size);
+	request_stream.write(reinterpret_cast<const char*>(&content_size_con), sizeof(message_content_size));
 
-	request_stream.write(reinterpret_cast<const char*>(&message_content), message_content.size());
+	request_stream.write(reinterpret_cast<const char*>(&message_content), message_content_size);
 
 	boost::asio::write(socket, buffer);
 }
@@ -172,15 +208,20 @@ void FileSendMessage::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(client_id.data()), client_id.size());
 
 	request_stream.put(version);
-	request_stream.write(reinterpret_cast<const char*>(&request_code), sizeof(request_code));
-	request_stream.write(reinterpret_cast<const char*>(&payload_size), sizeof(payload_size));
+
+	uint16_t request_code_con = boost::endian::native_to_little(request_code);
+	request_stream.write(reinterpret_cast<const char*>(&request_code_con), sizeof(request_code));
+
+	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
+	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
 	request_stream.put(message_type);
 
-	request_stream.write(reinterpret_cast<const char*>(&message_content_size), sizeof(message_content_size));
+	uint32_t content_size_con = boost::endian::native_to_little(message_content_size);
+	request_stream.write(reinterpret_cast<const char*>(&content_size_con), sizeof(message_content_size));
 
-	request_stream.write(reinterpret_cast<const char*>(&file_content), file_content.size());
+	request_stream.write(reinterpret_cast<const char*>(&file_content), message_content_size);
 
 	boost::asio::write(socket, buffer);
 }
@@ -477,16 +518,19 @@ std::unique_ptr<BaseResponse> parseResponse() {
 			throw std::runtime_error("Failed to read version from the buffer.");
 		}
 		//validateField("user_id", user_id, Protocol::USER_ID_SIZE);
+		
 
 		input_stream.read(reinterpret_cast<char*>(&response_code), ProtocolConstants::RESPONSE_CODE_SIZE);
 		if (input_stream.fail()) {
 			throw std::runtime_error("Failed to read response code from the buffer.");
 		}
+		boost::endian::little_to_native_inplace(response_code);
 
 		input_stream.read(reinterpret_cast<char*>(&payload_size), ProtocolConstants::PAYLOAD_FIELD_SIZE);
 		if (input_stream.fail()) {
 			throw std::runtime_error("Failed to read response code from the buffer.");
 		}
+		boost::endian::little_to_native_inplace(payload_size);
 
 		if (response_code == ProtocolConstants::Response::REGISTRATION_SUCCESS) {
 			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE) {
@@ -521,8 +565,6 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
 				input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
 
-				//client_ids.push_back(client_id);
-
 				size_t name_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_NAME_SIZE));
 				if (name_bytes < ProtocolConstants::CLIENT_NAME_SIZE) {
 					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client name");
@@ -532,7 +574,6 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				input_stream.read(reinterpret_cast<char*>(&client_name_arr), ProtocolConstants::CLIENT_ID_SIZE);
 
 				std::string client_name(client_name_arr.begin(), client_name_arr.end()); // Copy the array from uint8_t form to char array (to string).
-				//client_names.push_back(client_name);
 
 				handler.addClient(client_id, client_name);
 				cout << i + 1 << ". " << client_name << endl;
@@ -584,6 +625,8 @@ std::unique_ptr<BaseResponse> parseResponse() {
 			uint32_t message_id;
 			input_stream.read(reinterpret_cast<char*>(&message_id), ProtocolConstants::MESSAGE_ID_SIZE);
 
+			boost::endian::little_to_native_inplace(message_id);
+
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
 		}
 		else if (response_code == ProtocolConstants::Response::FETCHING_INCOMING_MESSAGES_SUCCESS) {
@@ -617,17 +660,19 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				if (input_stream.fail()) {
 					throw std::runtime_error("Failed to read message_id from the buffer.");
 				}
+				boost::endian::little_to_native_inplace(message_id);
 
 				input_stream.read(reinterpret_cast<char*>(&message_type), ProtocolConstants::MESSAGE_TYPE_SIZE);
 				if (input_stream.fail()) {
 					throw std::runtime_error("Failed to read message_type from the buffer.");
 				}
+				boost::endian::little_to_native_inplace(message_type);
 
 				input_stream.read(reinterpret_cast<char*>(&message_content_size), ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE);
 				if (input_stream.fail()) {
 					throw std::runtime_error("Failed to read message content size from the buffer.");
 				}
-
+				boost::endian::little_to_native_inplace(message_content_size);
 
 				// Read the message content from the communication
 				size_t message_content_bytes = boost::asio::read(socket, buffer, boost::asio::transfer_exactly(message_content_size));

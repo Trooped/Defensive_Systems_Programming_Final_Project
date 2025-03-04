@@ -37,6 +37,7 @@ The server will do the operation and respond with the following statuses:
 #include <string>
 #include <iostream>
 #include <boost/asio.hpp>
+#include <boost/endian/conversion.hpp>
 #include <fstream>
 #include <filesystem>
 #include <vector>
