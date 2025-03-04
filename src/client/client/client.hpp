@@ -17,6 +17,7 @@ The client can send the following requests to the server:
 - 603 - 1: Symmetrical key from other client request
 - 603 - 2: Symmetrical key to other client request
 - 603 - 3: Text message send request 
+- 603 - 4: File send request
 - 604: Incoming messages addressed to the client request
 
 The server will do the operation and respond with the following statuses:
@@ -41,6 +42,7 @@ The server will do the operation and respond with the following statuses:
 #include <vector>
 #include <optional>
 #include <unordered_map>
+#include <math.h>
 
 #include "cryptlib.h"
 #include <osrng.h>
@@ -58,7 +60,7 @@ using boost::asio::ip::tcp;
 namespace ProtocolConstants {
 
     // General Protocol Details
-    constexpr uint8_t CLIENT_VERSION = 1;      // Current protocol version
+    constexpr uint8_t CLIENT_VERSION = 2;      // Current protocol version
     //constexpr uint16_t MAX_FILENAME_LENGTH = 255; // Maximum allowed filename length
 
 
@@ -71,6 +73,7 @@ namespace ProtocolConstants {
         SEND_TEXT_MESSAGE_CODE = 150,
         REQUEST_SYMMETRIC_KEY = 151,
         SEND_SYMMETRIC_KEY = 152,
+        SEND_FILE = 153,
         EXIT_CLIENT = 0
     };
 
@@ -89,7 +92,7 @@ namespace ProtocolConstants {
         REQUEST_SYMMETRICAL_KEY = 1,
         SEND_SYMMETRICAL_KEY = 2,
         SEND_TEXT_MESSAGE = 3,
-        //SEND_FILE = 4
+        SEND_FILE = 4
     };
 
     // Server Response Codes
@@ -121,6 +124,7 @@ namespace ProtocolConstants {
     constexpr size_t MESSAGE_CONTENT_FIELD_SIZE = 4;    // Size of message content field (describing the size of the following message content)
     constexpr size_t MESSAGE_ID_SIZE = 4;
     constexpr size_t MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE = 0;
+    constexpr size_t MAXIMUM_TEXT_AND_FILE_SIZE = UINT32_MAX;
 
     // Request Payload Sizes
     constexpr size_t REGISTER_PAYLOAD_SIZE = CLIENT_NAME_SIZE + PUBLIC_KEY_SIZE;
@@ -134,17 +138,6 @@ namespace ProtocolConstants {
     constexpr size_t MESSAGE_HEADER_SIZE = CLIENT_ID_SIZE + MESSAGE_ID_SIZE + MESSAGE_TYPE_SIZE + MESSAGE_CONTENT_FIELD_SIZE;
 
 
-    // More constants
-    constexpr char DEFAULT_CLIENT_ID[16] = {0}; // Default client ID, to use when registering
-
-    
-
-    /*
-    constexpr size_t BASIC_REQUEST_SIZE = USER_ID_SIZE + VERSION_SIZE + OP_SIZE;  // Fixed header size in bytes, consiting of only
-    constexpr size_t NAME_LEN_SIZE = 2;          // Size of name_len field (2 bytes)
-    constexpr size_t METADATA_REQUEST_SIZE = BASIC_REQUEST_SIZE + NAME_LEN_SIZE;
-    */
-
 }; // namespace Protocol
 
 // Class declarations for the Request & Message classes
@@ -156,11 +149,6 @@ protected:
     uint32_t payload_size;
 public:
     BaseRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
-    /* MAYBE ADD THIS LATER? IS IT NECESSARY?
-    const std::array<uint8_t, 16>& getClientIdBytes() const {
-        return client_id;
-    }
-    */
     virtual ~BaseRequest() = default;
     virtual void sendRequest(tcp::socket& socket) const;
 };
@@ -171,11 +159,10 @@ protected:
     std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
 public:
     RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key);
-    /*std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArray(const std::string& str);*/
     void sendRequest(tcp::socket& socket);
 };
 
-// No extra attributes, and payload size = 0. Relevant to 601 & 604 request codes
+// No extra attributes, and payload size = 0. Relevant to 601 (clients list) & 604 (fetch waiting messages) request codes
 class basicRequest : public BaseRequest {
 public:
     basicRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
@@ -222,6 +209,13 @@ class textMessage : public Message {
     std::vector<uint8_t> message_content;
 public:
     textMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content);
+    void sendRequest(tcp::socket& socket);
+};
+
+class FileSendMessage : public Message {
+    std::vector<uint8_t> file_content;
+public:
+    FileSendMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> file_content);
     void sendRequest(tcp::socket& socket);
 };
 
