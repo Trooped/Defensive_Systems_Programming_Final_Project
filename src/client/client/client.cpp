@@ -262,13 +262,15 @@ ErrorResponse::ErrorResponse(uint8_t version, uint16_t response_code, uint32_t p
 void ClientHandler::addClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
 	const std::string& client_name)
 {
-	clients[client_id] = ClientInfo(client_name);
+	std::string clientIDStr(reinterpret_cast<const char*>(client_id.data()), client_id.size());
+	clients[clientIDStr] = ClientInfo(client_name);
 };
 
 bool ClientHandler::setPublicKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
 	const std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& public_key)
 {
-	auto it = clients.find(client_id);
+	std::string clientIDStr(reinterpret_cast<const char*>(client_id.data()), client_id.size());
+	auto it = clients.find(clientIDStr);
 	if (it != clients.end()) {
 		it->second.public_key = public_key;
 		return true;
@@ -279,7 +281,9 @@ bool ClientHandler::setPublicKey(const std::array<uint8_t, ProtocolConstants::CL
 bool ClientHandler::setSymmetricKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
 	const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key)
 {
-	auto it = clients.find(client_id);
+	std::string clientIDStr(reinterpret_cast<const char*>(client_id.data()), client_id.size());
+
+	auto it = clients.find(clientIDStr);
 	if (it != clients.end()) {
 		it->second.symmetric_key = symmetric_key;
 		return true;
@@ -288,9 +292,12 @@ bool ClientHandler::setSymmetricKey(const std::array<uint8_t, ProtocolConstants:
 };
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientIDByName(const std::string& name) {
-	for (auto& it : clients) {
-		if (it.second.client_name == "name") {
-			return it.first;
+	for (const auto& it : clients) {
+		if (it.second.client_name == name) {
+			// Convert std::string(it.first) to std::array<uint8_t, 16>
+			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id{};
+			std::memcpy(client_id.data(), it.first.data(), std::min(it.first.size(), client_id.size()));
+			return client_id;
 		}
 	}
 	throw runtime_error("Can't find " + name + " inside clients list, please check the name again, or ask for clients list again.");
@@ -298,7 +305,9 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientI
 
 std::optional<ClientInfo> ClientHandler::getClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id) const
 {
-	auto it = clients.find(client_id);
+	std::string clientIDStr(reinterpret_cast<const char*>(client_id.data()), client_id.size());
+
+	auto it = clients.find(clientIDStr);
 	if (it != clients.end()) {
 		return it->second;
 	}
@@ -497,12 +506,12 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClient
 	return client_id;
 }
 
-std::unique_ptr<BaseResponse> parseResponse() {
+std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket) {
 	boost::asio::streambuf buffer; // Declare a buffer for the incoming socket bytes, for easy parsing.
 	std::istream input_stream(&buffer); // Linked to the buffer, used for easy gathering of the required data
 	try {
 		// Read the basic request (user_id, version and operation number).
-		size_t basic_response_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::BASIC_RESPONSE_SIZE));
+		size_t basic_response_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::BASIC_RESPONSE_SIZE));
 		if (basic_response_bytes < ProtocolConstants::BASIC_RESPONSE_SIZE) {
 			throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for version, response code and payload_size fields.");
 		}
@@ -536,14 +545,14 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				throw std::runtime_error("Payload size has different value than what's expected in register response");
 			}
 
-			size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+			size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
 			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
 				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
 			}
 			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
 
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-			input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+			input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
 
 			return std::make_unique<RegisterResponse>(version, response_code, payload_size, client_id);
 		}
@@ -556,15 +565,15 @@ std::unique_ptr<BaseResponse> parseResponse() {
 			cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
 
 			for (size_t i = 0; i < num_of_clients; i++) {
-				size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+				size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
 				if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
 					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
 				}
 				buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
 				std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-				input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+				input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
 
-				size_t name_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_NAME_SIZE));
+				size_t name_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_NAME_SIZE));
 				if (name_bytes < ProtocolConstants::CLIENT_NAME_SIZE) {
 					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client name");
 				}
@@ -585,15 +594,15 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				throw std::runtime_error("Payload size has different value than what's expected in public key response");
 			}
 
-			size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+			size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
 			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
 				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
 			}
 			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-			input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+			input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
 
-			size_t public_key_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::PUBLIC_KEY_SIZE));
+			size_t public_key_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::PUBLIC_KEY_SIZE));
 			if (public_key_bytes < ProtocolConstants::PUBLIC_KEY_SIZE) {
 				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for public key");
 			}
@@ -608,15 +617,15 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				throw std::runtime_error("Payload size has different value than what's expected in message sent response");
 			}
 
-			size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+			size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
 			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
 				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
 			}
 			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-			input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+			input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
 
-			size_t message_id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::MESSAGE_ID_SIZE));
+			size_t message_id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::MESSAGE_ID_SIZE));
 			if (message_id_bytes < ProtocolConstants::MESSAGE_ID_SIZE) {
 				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for message_id");
 			}
@@ -633,7 +642,7 @@ std::unique_ptr<BaseResponse> parseResponse() {
 			ClientHandler& handler = ClientHandler::getInstance();
 			cout << "Printing the incoming messages: " << endl;
 			while (true) {
-				size_t message_header_bytes = boost::asio::read(socket, buffer, boost::asio::transfer_exactly(ProtocolConstants::MESSAGE_HEADER_SIZE));
+				size_t message_header_bytes = boost::asio::read(*socket, buffer, boost::asio::transfer_exactly(ProtocolConstants::MESSAGE_HEADER_SIZE));
 				if (message_header_bytes == 0) {
 					std::cout << "No more messages. Stopping.\n";
 					break;
@@ -649,7 +658,7 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				uint8_t message_type;
 				uint32_t message_content_size;
 
-				input_stream.read(reinterpret_cast<char*>(&client_id), ProtocolConstants::CLIENT_ID_SIZE);
+				input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
 				if (input_stream.fail()) {
 					throw std::runtime_error("Failed to read sending client_id from the buffer.");
 				}
@@ -674,7 +683,7 @@ std::unique_ptr<BaseResponse> parseResponse() {
 				boost::endian::little_to_native_inplace(message_content_size);
 
 				// Read the message content from the communication
-				size_t message_content_bytes = boost::asio::read(socket, buffer, boost::asio::transfer_exactly(message_content_size));
+				size_t message_content_bytes = boost::asio::read(*socket, buffer, boost::asio::transfer_exactly(message_content_size));
 				if (message_content_bytes != message_content_size) {
 					throw std::runtime_error("Mismatch between message content size and message content");
 				}
@@ -813,7 +822,7 @@ void clientRegister(std::shared_ptr<tcp::socket>& socket) {
 	request->sendRequest(*socket);
 
 	// Receive a response
-	std::unique_ptr<BaseResponse> response = parseResponse();
+	std::unique_ptr<BaseResponse> response = parseResponse(socket);
 
 	const string filename = "me.info";
 	if (doesFileExist(filename)) {
@@ -860,7 +869,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			request->sendRequest(*socket);
 
 			// Managing the response
-			response = parseResponse();
+			response = parseResponse(socket);
 
 			break;
 		}
@@ -882,7 +891,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			request->sendRequest(*socket);
 
 			// Managing the response
-			response = parseResponse();
+			response = parseResponse(socket);
 
 			break;
 		}
@@ -901,7 +910,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			request->sendRequest(*socket);
 
 			// Managing the response
-			response = parseResponse();
+			response = parseResponse(socket);
 
 			break;
 		}
@@ -951,7 +960,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			}
 
 			// Managing the response
-			response = parseResponse();
+			response = parseResponse(socket);
 
 			break;
 		}
@@ -975,7 +984,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			request->sendRequest(*socket);
 
 			// Managing the response
-			response = parseResponse();
+			response = parseResponse(socket);
 
 			break;
 		}
@@ -1014,6 +1023,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 						ProtocolConstants::MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE,
 						dest_client_id,
 						ProtocolConstants::Message::SEND_SYMMETRICAL_KEY,
+						ProtocolConstants::SYMMETRIC_KEY_SIZE,
 						encrypted_symmetric_key
 					);
 
@@ -1030,7 +1040,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			}
 
 			// Managing the response
-			response = parseResponse();
+			response = parseResponse(socket);
 
 			break;
 		}
@@ -1096,7 +1106,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 			}
 
 			// Managing the response
-			response = parseResponse();
+			response = parseResponse(socket);
 
 			break;
 		}

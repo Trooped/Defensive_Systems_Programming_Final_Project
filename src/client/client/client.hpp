@@ -199,7 +199,6 @@ public:
 
 class symmetricKeySendMessage : public Message {
 protected:
-    // ADD THE SYMMETRICAL KEY SIZE AND ATTRIBUTE, for right now let's say it's 160 bytes string
     std::string encrypted_symmetric_key;
 public:
     symmetricKeySendMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key);
@@ -242,6 +241,7 @@ public:
 };
 
 class ClientsListResponse : public BaseResponse {
+public:
     ClientsListResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
@@ -250,11 +250,13 @@ struct ClientInfo {
     std::optional<std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>> public_key;  // Optional field
     std::optional<std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>> symmetric_key;  // Optional field
 
+    ClientInfo() = default;
+
     ClientInfo(const std::string& name) : client_name(name) {}
 };
 
 class ClientHandler {
-    std::unordered_map<std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>, ClientInfo> clients;
+    std::unordered_map<std::string, ClientInfo> clients;
     // Private constructor for single instance
     ClientHandler() = default;
 public:
@@ -306,10 +308,12 @@ public:
 
 
 class WaitingMessagesFetchResponse : public BaseResponse {
+public:
     WaitingMessagesFetchResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
 class ErrorResponse : public BaseResponse {
+public:
     ErrorResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 

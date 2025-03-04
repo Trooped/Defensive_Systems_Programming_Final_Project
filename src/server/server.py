@@ -33,7 +33,6 @@ from enum import Enum
 import sqlite3
 import os
 
-
 # general constants:
 VERSION_NUMBER = 2
 
@@ -50,7 +49,7 @@ class MessageType(Enum):
     SYMMETRICAL_KEY_REQUEST = 1  # Message content is empty and Content Size = 0
     SYMMETRICAL_KEY_SEND = 2  # Message content has a symmetrical key, encrypted by the public key of the target client
     SEND_TEXT_MESSAGE = 3  # Message content contains text encrypted by the symmetrical key
-    # SEND_FILE_MESSAGE = 4 TODO bonus feature
+    SEND_FILE_MESSAGE = 4
 
 
 class MessageOffset(Enum):
@@ -76,6 +75,7 @@ class RequestOffset(Enum):
     REQUEST_CODE_SIZE = 2
     REQUEST_PAYLOAD_SIZE = 4
 
+
 class RequestFieldsSizes(Enum):
     CLIENT_NAME_SIZE = 255
     PUBLIC_KEY_SIZE = 160
@@ -83,10 +83,23 @@ class RequestFieldsSizes(Enum):
     MESSAGE_TYPE_SIZE = 1
     CONTENT_SIZE_SIZE = 4
 
+
+class ResponseFieldsSizes(Enum):
+    VERSION_SIZE = 1
+    RESPONSE_CODE_SIZE = 2
+    PAYLOAD_SIZE = 4
+    PUBLIC_KEY_SIZE = 160
+    CLIENT_ID_SIZE = 16
+    CLIENT_NAME_SIZE = 255
+    MESSAGE_ID_SIZE = 4
+    MESSAGE_TYPE_SIZE = 1
+    MESSAGE_CONTENT_SIZE = 4
+
+
 class EncryptionKeysSizes(Enum):
-    SYMMETRIC_KEY_SIZE = 128 # bits, 16 bytes
-    ASSYMETRIC_KEY_SIZE = 1024 # bits, 128 bytes????????????????????????????????????????????????
-    PUBLIC_KEY_SIZE = 160 # bytes
+    SYMMETRIC_KEY_SIZE = 16  # bytes
+    PRIVATE_KEY_SIZE = 128  # bytes
+    PUBLIC_KEY_SIZE = 160  # bytes
 
 
 class RequestType(Enum):
@@ -120,6 +133,7 @@ class ResponseType(Enum):
     # Message Size + Message content (ONE MESSAGE AFTER THE OTHER)
     GENERAL_ERROR = 9000  # Payload field is empty, Payload size = 0
 
+
 class Message:
     """
     A general Message class that is responsible for parsing the received message and initializing it with the appropriate parameters.
@@ -132,7 +146,7 @@ class Message:
     SYMMETRICAL_KEY_REQUEST_MESSAGE = 1
     SYMMETRICAL_KEY_SEND_MESSAGE = 2
     TEXT_SEND_MESSAGE = 3
-    #FILE_SEND_MESSAGE = 4 todo add this feature!
+    FILE_SEND_MESSAGE = 4
 
     def __init__(self, request):
         self.request = request  # Contains the request bytes
@@ -145,18 +159,17 @@ class Message:
 
     def parse_message(self):
         try:
-            offset = 0
             if len(self.request) < self.MIN_MESSAGE_LENGTH.value:
                 raise ValueError("Message is too short to be valid. No valid client id field was received.")
 
             self.target_client_id = struct.unpack('<16s', self.request[
-                                                    : self.MIN_MESSAGE_LENGTH.value])
+                                                          : self.MIN_MESSAGE_LENGTH.value])
             offset = self.MIN_MESSAGE_LENGTH.value
 
             if len(self.request) < offset + self.MESSAGE_TYPE_SIZE.value:
                 raise ValueError("Message is too short to be valid. No valid message type field was received.")
             self.message_type = struct.unpack('<B', self.request[
-                                                   offset : offset + self.MESSAGE_TYPE_SIZE.value])
+                                                    offset: offset + self.MESSAGE_TYPE_SIZE.value])
             offset = offset + self.MESSAGE_TYPE_SIZE.value
 
             if self.message_type == self.SYMMETRICAL_KEY_REQUEST_MESSAGE.value:
@@ -165,15 +178,16 @@ class Message:
                 self.symmetrical_key_send_message(offset)
             elif self.message_type == self.TEXT_SEND_MESSAGE.value:
                 self.text_send_message(offset)
+            elif self.message_type == self.FILE_SEND_MESSAGE.value:
+                self.file_send_message(offset)
             else:
                 raise ValueError("No valid message type field was received.")
-
 
             """CONTENT SIZE AND CONTENT PARSING"""
             if len(self.request) < offset + self.MESSAGE_CONTENT_SIZE.value:
                 raise ValueError("Message is too short to be valid. No valid  content size field was received.")
             self.content_size = struct.unpack('<I', self.request[
-                                                   offset : offset + self.MESSAGE_CONTENT_SIZE.value])
+                                                    offset: offset + self.MESSAGE_CONTENT_SIZE.value])
             offset = offset + self.MESSAGE_CONTENT_SIZE.value
 
             if len(self.request) < offset + self.content_size:
@@ -189,10 +203,9 @@ class Message:
         """ Handle symmetrical key request messages """
         # Make sure that Content Size = 0
         self.content_size = struct.unpack('<I', self.request[
-                                            offset: offset + self.MESSAGE_CONTENT_SIZE.value])
+                                                offset: offset + self.MESSAGE_CONTENT_SIZE.value])
         if self.content_size != 0:
             raise ValueError("Invalid message. Symmetrical key request message must be empty.")
-
 
     def symmetrical_key_send_message(self, offset):
         """ Handle symmetrical key send messages """
@@ -200,21 +213,31 @@ class Message:
             raise ValueError("Message is too short to be valid. No valid  content size field was received.")
         self.content_size = struct.unpack('<I', self.request[
                                                 offset: offset + self.MESSAGE_CONTENT_SIZE.value])
-        offset = offset + self.MESSAGE_CONTENT_SIZE.value
-        self.message_content = struct.unpack('<16s', self.request[offset: offset + EncryptionKeysSizes.SYMMETRIC_KEY_SIZE.value])
-        #todo maybe it's like the text_send_message? just interpret as bytes???
+        offset = offset + self.MESSAGE_CONTENT_SIZE
+        self.message_content = struct.unpack('<16s', self.request[
+                                                     offset: offset + EncryptionKeysSizes.SYMMETRIC_KEY_SIZE.value])
+        # todo maybe it's like the text_send_message? just interpret as bytes???
 
-        #TODO add a check to make sure that the sizes are correct and matching (content size = len(message content) and that it's correct).
+        # TODO add a check to make sure that the sizes are correct and matching (content size = len(message content) and that it's correct).
+
     def text_send_message(self, offset):
         if len(self.request) < offset + self.MESSAGE_CONTENT_SIZE.value:
-            raise ValueError("Message is too short to be valid. No valid  content size field was received.")
+            raise ValueError("Message is too short to be valid. No valid content size field was received.")
         self.content_size = struct.unpack('<I', self.request[
                                                 offset: offset + self.MESSAGE_CONTENT_SIZE.value])
 
         offset = offset + self.MESSAGE_CONTENT_SIZE
         self.message_content = self.request[offset: offset + self.content_size[0]]
 
-        #todo same as above, validate length matching and correct type etc...
+        # todo same as above, validate length matching and correct type etc...
+
+    def file_send_message(self, offset):
+        if len(self.request) < offset + self.MESSAGE_CONTENT_SIZE.value:
+            raise ValueError("Message is too short to be valid. No valid content size field was received.")
+        self.content_size = struct.unpack('<I', self.request[
+                                                offset: offset + self.MESSAGE_CONTENT_SIZE.value])
+        offset = offset + self.MESSAGE_CONTENT_SIZE
+        self.message_content = self.request[offset: offset + self.content_size[0]]
 
 
 class Request:
@@ -239,28 +262,34 @@ class Request:
 
         self.parse_payload()
 
-
     def parse_payload(self):
         try:
             if len(self.request) < self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value:
                 raise ValueError("Request is too short to be valid. No valid payload size field was received.")
 
-            self.payload_size = struct.unpack('<I', self.request[self.offset:self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value])
+            self.payload_size = struct.unpack('<I', self.request[self.offset:self.offset +
+                                                                             RequestOffset.REQUEST_PAYLOAD_SIZE.value])
             self.offset = self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value
 
             # Parse the payload according to the different request types
-            if self.request_code == RequestType.CLIENT_LIST_REQUEST.value or self.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
-                ###TODO do I need to ignore the payload size and payload fields? or parse them and validate that it's actually 0??
+            if (self.request_code == RequestType.CLIENT_LIST_REQUEST.value or
+                    self.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value):
+                if self.payload_size > 0:
+                    raise ValueError("Payload size is too large for the current request")
+                # TODO maybe i need to validate the payload field as well?
+
             elif self.request_code == RequestType.REGISTER_REQUEST.value:
                 if len(self.request) < self.offset + RequestFieldsSizes.CLIENT_NAME_SIZE.value:
                     raise ValueError("Request is too short to be valid. No valid client name field was received.")
-                client_name_bytes = struct.unpack('<255s', self.request[self.offset:self.offset + RequestFieldsSizes.CLIENT_NAME_SIZE.value])
+                client_name_bytes = struct.unpack('<255s', self.request[
+                                                           self.offset:self.offset + RequestFieldsSizes.CLIENT_NAME_SIZE.value])
                 self.client_name = client_name_bytes.split(b'\x00', 1)[0].decode('ascii')
                 self.offset = self.offset + RequestFieldsSizes.CLIENT_NAME_SIZE.value
 
                 if len(self.request) < self.offset + RequestFieldsSizes.PUBLIC_KEY_SIZE.value:
                     raise ValueError("Request is too short to be valid. No valid public key field was received.")
-                public_key_bytes = struct.unpack('<160s', self.request[self.offset:self.offset + RequestFieldsSizes.PUBLIC_KEY_SIZE.value])
+                public_key_bytes = struct.unpack('<160s', self.request[
+                                                          self.offset:self.offset + RequestFieldsSizes.PUBLIC_KEY_SIZE.value])
                 self.public_key = public_key_bytes[0]
 
                 # TODO register the user and/ or call the other functions
@@ -268,7 +297,8 @@ class Request:
             elif self.request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
                 if len(self.request) < self.offset + RequestFieldsSizes.CLIENT_ID_SIZE.value:
                     raise ValueError("Request is too short to be valid. No valid client id field was received.")
-                client_id_bytes = struct.unpack('<16s', self.request[self.offset:self.offset + RequestFieldsSizes.CLIENT_ID_SIZE.value])
+                client_id_bytes = struct.unpack('<16s', self.request[
+                                                        self.offset:self.offset + RequestFieldsSizes.CLIENT_ID_SIZE.value])
                 self.target_client_id = client_id_bytes[0]
 
                 # TODO call the next functions!
@@ -278,8 +308,6 @@ class Request:
 
             else:
                 raise ValueError("Invalid request code.")
-
-
 
         except struct.error as e:
             print(f"Error unpacking request payload: {e}")
@@ -307,7 +335,8 @@ class Request:
                     "Request is too short to be valid, invalid ToClient ID length was received.")
 
             # gather the client version
-            self.client_version = struct.unpack('<B', self.request[self.offset:self.offset + RequestOffset.CLIENT_VERSION_SIZE.value])
+            self.client_version = struct.unpack('<B', self.request[
+                                                      self.offset:self.offset + RequestOffset.CLIENT_VERSION_SIZE.value])
             self.offset += RequestOffset.CLIENT_VERSION_SIZE.value
 
             if len(self.request) < self.offset + RequestOffset.REQUEST_CODE_SIZE.value:
@@ -320,7 +349,7 @@ class Request:
                 '<H', self.request[self.offset:self.offset + RequestOffset.REQUEST_CODE_SIZE.value])
             self.offset += RequestOffset.REQUEST_CODE_SIZE.value
 
-            #TODO add length validation for all "size" fields followed by payload, like in the next example:
+            # TODO add length validation for all "size" fields followed by payload, like in the next example:
             """
             # Skip the filename of `name_len` bytes
             filename_received = response[offset:offset + name_len].decode('ascii')
@@ -410,7 +439,8 @@ class Request:
         self.payload = buffer
 """
 
-#TODO add a validate username function!!!!!!!!!!!!!
+
+# TODO add a validate username function!!!!!!!!!!!!!
 class Database:
     DB_FILENAME = "defensive.db"
     CLIENTS_TABLE_NAME = "clients"
@@ -418,8 +448,7 @@ class Database:
 
     def __init__(self):
         self.connection = sqlite3.connect(self.DB_FILENAME)
-        self.create_tables() # Creates the clients and messages tables if they don't exist
-
+        self.create_tables()  # Creates the clients and messages tables if they don't exist
 
     def does_client_exist(self, username: str) -> bool:
         """Checks if the username exists in the database"""
@@ -439,7 +468,7 @@ class Database:
         """Get a client by their username."""
         cursor = self.connection.cursor()
         try:
-            self.validate_username(username) # Validate the given username
+            self.validate_username(username)  # Validate the given username
             cursor.execute(
                 f"SELECT * FROM {self.CLIENTS_TABLE} WHERE name = ?;", (username,)
             )
@@ -454,7 +483,6 @@ class Database:
             return None  # Return `None` if no client is found
         return rows[0]  # Return the first matching row
 
-
     # TODO validate all message fields inside of the message class
     def insert_message(self, to_client_id, from_client_id, message_type, content):
         """Insert a message into the DB Messages table"""
@@ -465,6 +493,8 @@ class Database:
                 (to_client_id, from_client_id, message_type, content)
             )
             self.connection.commit()
+            message_id = cursor.lastrowid
+            return message_id
         except Exception as e:
             print(f"ERROR: unable to insert message into DB: {e}")
         finally:
@@ -534,7 +564,6 @@ class Database:
         finally:
             cursor.close()
 
-
     def insert_public_key(self, username: str, public_key: bytes):
         """
         Insert or update the public key for a specific client in the database.
@@ -561,8 +590,9 @@ class Database:
         """Fetch all registered clients' usernames except the one specified."""
         cursor = self.connection.cursor()
         try:
-            cursor.execute(f"SELECT name FROM {self.CLIENTS_TABLE_NAME} WHERE name != ?;", username)
-            return [row[0] for row in cursor.fetchall()]
+            cursor.execute(f"SELECT id, name FROM {self.CLIENTS_TABLE_NAME} WHERE name != ?;", username)
+            results = cursor.fetchall()
+            return results
         except Exception as e:
             print(f"Error fetching registered clients: {e}")
             return []
@@ -628,15 +658,16 @@ class Database:
         try:
             # Fetch all messages for the given to_client ID
             cursor.execute(
-                f"SELECT from_client, content FROM {self.MESSAGES_TABLE_NAME} WHERE to_client = ?;", (to_client_id,)
+                f"SELECT id, from_client, type, content FROM {self.MESSAGES_TABLE_NAME} WHERE to_client = ?;",
+                (to_client_id,)
             )
             results = cursor.fetchall()
 
             # Process each message
-            for from_client_id, content in results:
-                username = self.get_username_by_uuid(from_client_id)  # Get the username from the from_client ID
+            for message_id, from_client_id, message_type, content in results:
+                username = self.get_username_by_uuid(from_client_id)  # Convert UUID to username
                 if username is not None:
-                    messages.append([username, content])
+                    messages.append([from_client_id, message_id, message_type, content])
 
             # Delete the messages after fetching
             self.delete_messages_by_to_client(to_client_id)
@@ -690,9 +721,7 @@ class Database:
             cursor.close()  # Ensure the cursor is closed
 
 
-
 class ClientManager:
-
     BUFFER_SIZE = 4096
 
     def __init__(self, socket, database):
@@ -725,7 +754,7 @@ class ClientManager:
                 self.request = Request(self.buffer)
                 self.client_id = self.request.client_id
                 self.username = self.request.client_name
-                #self.last_active_time = self.request.last_seen
+                # self.last_active_time = self.request.last_seen
                 print(f"Processed request: {self.request}")
                 self.buffer = b""  # Clear the buffer for the next request
                 return
@@ -733,15 +762,13 @@ class ClientManager:
             print(f"Socket error: {e}")
             return
 
-
     def handle_request(self):
         request_code = self.request.request_code
-
+        response = Response(self.socket)
         try:
+            self.db.update_last_seen(self.username)  # Update the last seen time, because the user sent a request.
 
-            self.db.update_last_seen(self.username) # Update the last seen time, because the user sent a request.
-
-            #TODO after handling the request, handle the response and return it!!!
+            # TODO after handling the request, handle the response and return it!!!
             if request_code == RequestType.CLIENT_LIST_REQUEST.value:
                 self.client_list_request()
             elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
@@ -754,30 +781,37 @@ class ClientManager:
                 self.send_message_request()
         except Exception as e:
             print(f"Request error: {e}")
-            #TODO add the exception as to just return a server error maybe?
+            response.error_response()
         finally:
-            self.db.update_last_seen(self.username) #todo maybe it's not here??? maybe it's better in the top of the function????
+            self.db.update_last_seen(
+                self.username)  # todo maybe it's not here??? maybe it's better in the top of the function????
 
-
-    #TODO update the request handling functions
+    # TODO add more error handling here???????????
     def client_list_request(self):
-        client_list = self.db.fetch_all_registered_clients(self.username)
-        # TODO continue from here, need to send it back I GUESS
+        response = Response(socket)
+        clients_list = self.db.fetch_all_registered_clients(self.username)
+        response.client_list_response(clients_list)
+
     def incoming_messages_request(self):
         messages_list = self.db.fetch_all_registered_messages(self.username)
-        # todo continue with the response etc..
+        response = Response(socket)
+        response.fetching_messages_response(messages_list)
 
     def register_request(self):
-        #continue with the logic of registering a new user, and check for a current user already...
+        # TODO continue with the logic of registering a new user, and check for a current user already...
+        response = Response(socket)
+
         if not self.db.does_client_exist(self.username):
             server_client_id = self.db.insert_client(self.username, self.request.public_key)
+            response.register_response(server_client_id)
         else:
+            response.error_response()
             raise ValueError(f"Username '{self.username}' already exists in the DB.")
 
-
     def public_key_other_client_request(self):
+        response = Response(socket)
         public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
-
+        response.public_key_response(self.request.target_client_id, public_key_other_client)
 
     def send_message_request(self):
         from_client_id = self.client_id
@@ -785,9 +819,100 @@ class ClientManager:
         message_type = self.request.message.message_type
         message_content = self.request.message.message_content
 
-        self.db.insert_message(target_client_id, from_client_id, message_type, message_content)
+        message_id = self.db.insert_message(target_client_id, from_client_id, message_type, message_content)
+
+        response = Response(socket)
+        response.message_sent_response(target_client_id, message_id)
 
 
+class Response:
+    CHUNK_SIZE = 1024
+    def __init__(self, socket):
+        self.socket = socket
+        self.response_code = None
+        self.version = VERSION_NUMBER
+        self.payload_size = 0
+        self.response = None
+
+        self.client_id = None
+        self.public_key = None
+        self.message_id = None
+
+    def register_response(self, client_id):
+        self.response_code = ResponseType.CLIENT_REGISTER_REQUEST_SUCCESS.value
+        self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE
+        self.response = struct.pack("<BHI 16s", self.version, self.response_code, self.payload_size, client_id)
+
+        self.socket.sendall(self.response)
+
+    def client_list_response(self, clients_list):
+        self.response_code = ResponseType.CLIENT_LIST_REQUEST_SUCCESS.value
+        self.payload_size = len(clients_list) * (
+                ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.CLIENT_NAME_SIZE.value)
+        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+        self.socket.sendall(self.response)
+
+        for id, name in clients_list:
+            fmt_id = struct.pack("<16s", id)
+            while len(name) < ResponseFieldsSizes.CLIENT_NAME_SIZE.value:
+                name += b'\x00'
+            fmt_name = struct.pack("<255s", name)
+            self.socket.sendall(fmt_id + fmt_name)
+
+    def public_key_response(self, target_client_id, public_key):
+        self.response_code = ResponseType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST_SUCCESS
+        self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.PUBLIC_KEY_SIZE.value
+        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+        self.socket.sendall(self.response)
+
+        self.client_id = struct.pack("<16s", target_client_id)
+        self.public_key = struct.pack("<160s", public_key)
+        self.socket.sendall(self.client_id + self.public_key)
+
+    def message_sent_response(self, target_client_id, message_id):
+        self.response_code = ResponseType.SEND_MESSAGE_REQUEST_SUCCESS.value
+        self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value
+        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+        self.socket.sendall(self.response)
+
+        self.client_id = struct.pack("<16s", target_client_id)
+        self.message_id = struct.pack("<I", self.message_id)
+        self.socket.sendall(self.client_id + self.message_id)
+
+    def fetching_messages_response(self, messages_list):
+        self.response_code = ResponseType.RECEIVE_INCOMING_MESSAGES_SUCCESS.value
+
+        # Calculating the payload size
+        for client_id, message_id, message_type, content in messages_list:
+            self.payload_size += ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value + \
+                                 ResponseFieldsSizes.MESSAGE_TYPE_SIZE.value + \
+                                 ResponseFieldsSizes.MESSAGE_CONTENT_SIZE.value + len(content)
+
+        # Sending the response header
+        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+        self.socket.sendall(self.response)
+
+        # Sending all of the messages
+        for client_id, message_id, message_type, content in messages_list:
+            # Building the message header
+            fmt_id = struct.pack("<16s", client_id)
+            fmt_message_id = struct.pack("<I", message_id)
+            fmt_message_type = struct.pack("<B", message_type)
+            fmt_message_content_size = struct.pack("<I", len(content))
+
+            # Sending the message header
+            self.socket.sendall(fmt_id + fmt_message_id + fmt_message_type + fmt_message_content_size)
+
+            # Sending the message
+            for i in range(0, len(content), self.CHUNK_SIZE):
+                chunk = content[i:i + self.CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
+                self.socket.sendall(chunk)  # Send the chunk
+
+    def error_response(self):
+        self.response_code = ResponseType.GENERAL_ERROR.value
+        # Sending the error response
+        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+        self.socket.sendall(self.response)
 
 class Server:
     """
@@ -812,7 +937,7 @@ class Server:
         self.port = self.read_port()
         self.sel = selectors.DefaultSelector()
         self.running = True
-        self.db = Database()  # Replace with your actual DB manager
+        self.db = Database()
         self.sock = None
 
     def read_port(self) -> int:
@@ -885,6 +1010,7 @@ class Server:
         self.sel.close()
         if self.sock is not None:
             self.sock.close()
+
 
 def main():
     """The main function, creating the user_id for the runtime requests sequence, parsing the info_files and then calls the script."""
