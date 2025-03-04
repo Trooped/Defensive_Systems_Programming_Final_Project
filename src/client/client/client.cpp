@@ -485,11 +485,10 @@ std::string fetchPrivateKeyFromFile() {
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
 	std::string dest_client_name;
-	cout << "Please enter the message destination's client's name: ";
+	cout << "Who do you want to send a message to? (Please enter the full client name): ";
 	cin >> dest_client_name;
 	if (!isValidClientName(dest_client_name)) {
-		cout << "Invalid client name." << endl;
-		return;
+		throw runtime_error("Invalid client name.");
 	}
 
 	ClientHandler& handler = ClientHandler::getInstance();
@@ -556,7 +555,7 @@ std::unique_ptr<BaseResponse> parseResponse() {
 
 			cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
 
-			for (int i = 0; i < num_of_clients; i++) {
+			for (size_t i = 0; i < num_of_clients; i++) {
 				size_t id_bytes = boost::asio::read(socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
 				if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
 					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
@@ -717,7 +716,7 @@ std::unique_ptr<BaseResponse> parseResponse() {
 						cout << "Can't decrypt message.\n";
 					}
 				}
-				else if (message_type == ProtocolConstants::Message::SEND_FILE) {
+				else if (message_type == ProtocolConstants::Message::SEND_FILE_MESSAGE) {
 					if ((handler.getClient(client_id)->symmetric_key).has_value()) {
 						// Using the symmetric key to decrypt the file content message.
 						std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(client_id)->symmetric_key.value();
@@ -726,18 +725,27 @@ std::unique_ptr<BaseResponse> parseResponse() {
 						std::string file_content_string(message_content.begin(), message_content.end());
 						std::string decrypted_file_content= aes.decrypt(file_content_string.c_str(), file_content_string.length());
 
-						const char* tmpDir = std::getenv("TMP"); // The %TMP% directory
-						if (!tmpDir) {
-							std::cerr << "Error: TMP environment variable not found!" << std::endl;
+
+						char* tmpDir = nullptr;
+						size_t len = 0;
+
+						if (_dupenv_s(&tmpDir, &len, "TMP") != 0 || tmpDir == nullptr) {
+							std::cerr << "TMP environment variable not found, can't save the file." << std::endl;
 							continue;
 						}
-						char tmpFilename[L_tmpnam];  // Buffer for temp filename
-						std::tmpnam(tmpFilename); // Generating the temp filename
+
+						// Generate a secure temporary filename using tmpnam_s
+						char tmpFilename[L_tmpnam];
+						if (tmpnam_s(tmpFilename, L_tmpnam) != 0) {
+							std::cerr << "Could not generate temporary filename, can't save the file." << std::endl;
+							free(tmpDir);
+							continue;
+						}
 
 						std::string full_path = std::string(tmpDir) + "\\" + std::string(tmpFilename); // Creating the full path for the temp file
 						std::ofstream file(full_path);
 						if (!file) {
-							std::cerr << "Error: Could not create temp file!" << std::endl;
+							std::cerr << "Could not create temp file!" << std::endl;
 							continue;
 						}
 						file << decrypted_file_content;

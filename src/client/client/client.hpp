@@ -93,7 +93,7 @@ namespace ProtocolConstants {
         REQUEST_SYMMETRICAL_KEY = 1,
         SEND_SYMMETRICAL_KEY = 2,
         SEND_TEXT_MESSAGE = 3,
-        SEND_FILE = 4
+        SEND_FILE_MESSAGE = 4
     };
 
     // Server Response Codes
