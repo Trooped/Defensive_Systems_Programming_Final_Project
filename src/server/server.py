@@ -32,6 +32,7 @@ from datetime import datetime
 from enum import Enum
 import sqlite3
 import os
+from typing import Any
 
 # general constants:
 VERSION_NUMBER = 2
@@ -292,8 +293,15 @@ class Database:
         """Fetch all registered clients' usernames except the one specified."""
         cursor = self.connection.cursor()
         try:
-            cursor.execute(f"SELECT id, name FROM {self.CLIENTS_TABLE_NAME} WHERE name != ?;", username)
+
+            cursor.execute(f"SELECT id, name FROM {self.CLIENTS_TABLE_NAME};")
+            all_users = cursor.fetchall()
+            print(f"DEBUG: All Users in DB: {all_users}")
+
+            cursor.execute(f"SELECT id, name FROM {self.CLIENTS_TABLE_NAME} WHERE name != ?;", (username,))
             results = cursor.fetchall()
+
+            print(f"DEBUG: Excluding '{username}', Found: {results}")
             return results
         except Exception as e:
             print(f"Error fetching registered clients: {e}")
@@ -317,7 +325,7 @@ class Database:
         finally:
             cursor.close()
 
-    def get_username_by_uuid(self, client_id: bytes) -> str:
+    def get_username_by_uuid(self, client_id: bytes) -> Any | None:
         """
         Get a client's username by their UUID (id).
         Returns the username as a string or None if the client does not exist.
@@ -326,8 +334,7 @@ class Database:
         try:
             # Query the database for the username
             cursor.execute(
-                f"SELECT name FROM {self.CLIENTS_TABLE_NAME} WHERE id = ?;", (client_id,)
-            )
+                f"SELECT name FROM {self.CLIENTS_TABLE_NAME} WHERE id = ?;", (client_id,))
             result = cursor.fetchone()
         except Exception as e:
             print(f"ERROR: Failed to fetch username for ID '{client_id}': {e}")
@@ -640,7 +647,7 @@ class Request:
             # Parse the payload according to the different request types
             if (self.request_code == RequestType.CLIENT_LIST_REQUEST.value or
                     self.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value):
-                if self.payload_size[0] > 0:  # TODO is it [0]?? is it the correct one? or without anything?
+                if self.payload_size > 0:
                     raise ValueError("Payload size is too large for the current request")
                 # TODO maybe i need to validate the payload field as well?
 
@@ -744,6 +751,8 @@ class ClientManager:
                 request_bytes += self.socket.recv(RequestFieldsSizes.CLIENT_ID_SIZE.value)
                 self.request.request = request_bytes
                 self.request.parse_payload()
+            elif self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value or self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
+                self.request.parse_payload()
             elif self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:  # case 603
                 message_bytes = self.socket.recv(MessageOffset.MIN_MESSAGE_SIZE.value)
                 if message_bytes:
@@ -804,11 +813,14 @@ class ClientManager:
     # TODO add more error handling here???????????
     def client_list_request(self):
         response = Response(self.socket)
-        clients_list = self.db.fetch_all_registered_clients(self.username)
+        name = self.db.get_username_by_uuid(self.request.client_id)
+        clients_list = self.db.fetch_all_registered_clients(name)
+        print(clients_list)
         response.client_list_response(clients_list)
 
     def incoming_messages_request(self):
-        messages_list = self.db.fetch_all_registered_messages(self.username)
+        name = self.db.get_username_by_uuid(self.request.client_id)
+        messages_list = self.db.fetch_all_registered_messages(name)
         response = Response(self.socket)
         response.fetching_messages_response(messages_list)
 
@@ -849,7 +861,6 @@ class Response:
         self.version = VERSION_NUMBER
         self.payload_size = 0
         self.response = None
-
         self.client_id = None
         self.public_key = None
         self.message_id = None
@@ -868,8 +879,10 @@ class Response:
         self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
         self.socket.sendall(self.response)
 
-        for id, name in clients_list:
+        for (id, name) in clients_list:
             fmt_id = struct.pack("<16s", id)
+
+            name = name.encode("ascii")
             while len(name) < ResponseFieldsSizes.CLIENT_NAME_SIZE.value:
                 name += b'\x00'
             fmt_name = struct.pack("<255s", name)

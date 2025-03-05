@@ -293,6 +293,8 @@ bool ClientHandler::setSymmetricKey(const std::array<uint8_t, ProtocolConstants:
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientIDByName(const std::string& name) {
 	for (const auto& it : clients) {
+		cout << it.first << endl;
+		cout << it.second.client_name << endl;
 		if (it.second.client_name == name) {
 			// Convert std::string(it.first) to std::array<uint8_t, 16>
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id{};
@@ -494,13 +496,14 @@ std::string fetchPrivateKeyFromFile() {
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
 	std::string dest_client_name;
-	cout << "Who do you want to send a message to? (Please enter the full client name): ";
+	cout << "Please enter client name: ";
 	cin >> dest_client_name;
 	if (!isValidClientName(dest_client_name)) {
 		throw runtime_error("Invalid client name.");
 	}
 
 	ClientHandler& handler = ClientHandler::getInstance();
+	handler.printClients();
 
 	std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id = handler.getClientIDByName(dest_client_name); // Throws an error if the name isn't found.
 	return client_id;
@@ -789,6 +792,11 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 }
 
 void clientRegister(std::shared_ptr<tcp::socket>& socket) {
+	const string filename = "me.info";
+	if (doesFileExist(filename)) {
+		throw std::runtime_error("Warning: me.info file already exists, cancelling sign up operation.");
+	}
+
 	string username;
 	cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
 	cin >> username;
@@ -825,11 +833,6 @@ void clientRegister(std::shared_ptr<tcp::socket>& socket) {
 
 	// Receive a response
 	std::unique_ptr<BaseResponse> response = parseResponse(socket);
-
-	const string filename = "me.info";
-	if (doesFileExist(filename)) {
-		throw std::runtime_error("Warning: me.info file already exists, cancelling sign up operation.");
-	}
 
 	// Getting the client_id from the RegisterResponse class
 	if (auto* regResponse = dynamic_cast<RegisterResponse*>(response.get())) {
@@ -882,7 +885,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
 
-			request = make_unique<PublicKeyRequest>(
+			std::unique_ptr<PublicKeyRequest> request2 = make_unique<PublicKeyRequest>(
 				client_id,
 				ProtocolConstants::CLIENT_VERSION,
 				ProtocolConstants::Request::FETCH_OTHER_CLIENT_PUBLIC_KEY_REQUEST,
@@ -890,7 +893,7 @@ void handleUserInput(int operation_code, std::shared_ptr<tcp::socket>& socket) {
 				dest_client_id
 			);
 
-			request->sendRequest(*socket);
+			request2->sendRequest(*socket);
 
 			// Managing the response
 			response = parseResponse(socket);
