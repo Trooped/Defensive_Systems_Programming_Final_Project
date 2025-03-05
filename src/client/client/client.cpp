@@ -46,11 +46,11 @@ void RegisterRequest::sendRequest(tcp::socket& socket) {
 	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
 	// Pad the client name with '\0'
-	while (client_name.length() < 255) {
+	while (client_name.length() < ProtocolConstants::CLIENT_NAME_SIZE) {
 		client_name += '\0';
 	}
 	const char* char_name = client_name.c_str();
-	request_stream.write(reinterpret_cast<const char*>(&char_name), sizeof(char_name));
+	request_stream.write(char_name, ProtocolConstants::CLIENT_NAME_SIZE);
 
 	request_stream.write(reinterpret_cast<const char*>(public_key.data()), public_key.size());
 
@@ -809,7 +809,7 @@ void clientRegister(std::shared_ptr<tcp::socket>& socket) {
 
 
 	// Creating the request
-	std::unique_ptr<BaseRequest> request = make_unique<RegisterRequest>(
+	std::unique_ptr<RegisterRequest> request = make_unique<RegisterRequest>(
 		default_uuid,
 		ProtocolConstants::CLIENT_VERSION,
 		ProtocolConstants::Request::REGISTER_REQUEST,
@@ -820,6 +820,8 @@ void clientRegister(std::shared_ptr<tcp::socket>& socket) {
 
 	// Send the registration request
 	request->sendRequest(*socket);
+
+	cout << "sent a request\n";
 
 	// Receive a response
 	std::unique_ptr<BaseResponse> response = parseResponse(socket);
