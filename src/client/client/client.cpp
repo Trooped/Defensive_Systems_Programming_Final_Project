@@ -602,6 +602,7 @@ std::string fetchPrivateKeyFromFile() {
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
 	std::string dest_client_name;
 	cout << "Please enter client name: ";
+
 	std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
 	std::getline(std::cin, dest_client_name);
 	if (!isValidClientName(dest_client_name)) {
@@ -1065,7 +1066,8 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 			std::string text_input;
 			cout << "Please enter the required text message to send: \n";
-			cin >> text_input; 
+			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
+			std::getline(std::cin, text_input);
 
 			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
 			if (text_input.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
@@ -1199,7 +1201,8 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 			std::string file_path;
 			cout << "Please enter the full path to the file you want to send (ASCII only file): \n";
-			cin >> file_path;
+			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
+			std::getline(std::cin, file_path);
 
 			// Checking if file exists and if we can open it, throw a "file not found" if not.
 			if (!doesFileExist(file_path)) {
