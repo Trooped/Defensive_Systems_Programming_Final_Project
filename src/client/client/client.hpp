@@ -245,6 +245,32 @@ public:
     ClientsListResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
+class PublicKeyResponse : public BaseResponse {
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey;
+public:
+    PublicKeyResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey);
+
+};
+
+class MessageSentResponse : public BaseResponse {
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+    uint32_t message_id;
+public:
+    MessageSentResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint32_t message_id);
+};
+
+
+class WaitingMessagesFetchResponse : public BaseResponse {
+public:
+    WaitingMessagesFetchResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
+};
+
+class ErrorResponse : public BaseResponse {
+public:
+    ErrorResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
+};
+
 struct ClientInfo {
     std::string client_name;
     std::optional<std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>> public_key;  // Optional field
@@ -291,33 +317,26 @@ public:
     void printClients() const;
 };
 
-class PublicKeyResponse : public BaseResponse {
-    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey;
+class ServerConnectionManager {
+    std::string ip;
+    std::string port;
+    boost::asio::io_context io_context;
+    std::shared_ptr<boost::asio::ip::tcp::socket> socket;
+
 public:
-    PublicKeyResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey);
+    ServerConnectionManager(); // Constructor reads IP & Port
 
+    bool isPortValid(const string& port);
+    bool isIPvalid(const string& ip);
+    void clearFileAndResetPointer(std::ifstream& file);
+    std::string readIPfromFile(const std::string& line);
+    std::string readPortfromFile(const std::string& line);
+    std::string validate_server_file(std::ifstream& file);
+
+    std::shared_ptr<boost::asio::ip::tcp::socket> connectToServer(); // Connect on demand
+    std::string getIP() const { return ip; }
+    std::string getPort() const { return port; }
 };
-
-class MessageSentResponse : public BaseResponse {
-    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-    uint32_t message_id;
-public:
-    MessageSentResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint32_t message_id);
-};
-
-
-class WaitingMessagesFetchResponse : public BaseResponse {
-public:
-    WaitingMessagesFetchResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
-};
-
-class ErrorResponse : public BaseResponse {
-public:
-    ErrorResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
-};
-
-
 
 
 

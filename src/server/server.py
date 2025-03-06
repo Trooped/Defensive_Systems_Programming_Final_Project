@@ -28,6 +28,7 @@ The server will do the operation and respond with the following statuses: TODO c
 import socket
 import selectors
 import struct
+import uuid
 from datetime import datetime
 from enum import Enum
 import sqlite3
@@ -241,13 +242,14 @@ class Database:
             if self.does_client_exist(username):
                 raise ValueError(f"Client '{username}' already exists in the database.")
 
-            # Generate a server-side client ID TODO maybe it's just an index? and not a random uuid????????
-            server_client_id = os.urandom(RequestFieldsSizes.CLIENT_ID_SIZE.value)
+            # Generate a server-side client ID
+            server_client_id = uuid.uuid4()
 
+            # TODO don't insert the datetime here, just call the function that does it in the end, or generally whenever there's a database access.
             # Insert the client into the database
             cursor.execute(
                 f"INSERT INTO {self.CLIENTS_TABLE_NAME} (id, name, public_key, last_seen) VALUES (?, ?, ?, ?);",
-                (server_client_id, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value),
+                (server_client_id.bytes, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value),
                  datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             )
             self.connection.commit()
