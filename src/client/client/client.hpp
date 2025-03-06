@@ -112,6 +112,7 @@ namespace ProtocolConstants {
     constexpr size_t PUBLIC_KEY_SIZE = 160;
     constexpr size_t PRIVATE_KEY_SIZE = 128;
     constexpr size_t SYMMETRIC_KEY_SIZE = 16;
+    constexpr size_t ENCRYPTED_SYMMETRIC_KEY_SIZE = 128;
 
     // General Request Sizes
     constexpr size_t CLIENT_ID_SIZE = 16;           // Size of user ID field (16 bytes)

@@ -102,6 +102,7 @@ class EncryptionKeysSizes(Enum):
     SYMMETRIC_KEY_SIZE = 16  # bytes
     PRIVATE_KEY_SIZE = 128  # bytes
     PUBLIC_KEY_SIZE = 160  # bytes
+    ENCRYPTED_SYMMETRIC_KEY_SIZE = 128  # bytes
 
 
 class RequestType(Enum):
@@ -443,6 +444,7 @@ class Message:
         self.target_client_id = None
         self.message_type = None
         self.content_size = None
+        self.message_content_bytes = None
         self.message_content = None
 
         self.parse_basic_message()
@@ -464,16 +466,21 @@ class Message:
         offset = offset + MessageOffset.MESSAGE_TYPE_SIZE.value
 
         if len(self.basic_message_bytes) < offset + MessageOffset.MESSAGE_CONTENT_SIZE.value:
-            raise ValueError("Message is too short to be valid. No valid  content size field was received.")
+            raise ValueError("Message is too short to be valid. No valid content size field was received.")
         self.content_size = struct.unpack('<I', self.basic_message_bytes[
                                                 offset: offset + MessageOffset.MESSAGE_CONTENT_SIZE.value])[0]
         offset = offset + MessageOffset.MESSAGE_CONTENT_SIZE.value
 
     def parse_message_content(self):
         try:
-            # TODO do this properly, with the functions afterwards properly writeen etc...
             """CONTENT SIZE AND CONTENT PARSING"""
-            if len(self.content_bytes) != self.content_size:
+            print("DEBUG PRINTS:")
+            print(self.message_content_bytes)
+            print()
+            hex_str = " ".join(f"{byte:02x}" for byte in self.message_content_bytes)
+            print(f"Raw Data ({len(self.message_content_bytes)} bytes): {hex_str}")
+
+            if len(self.message_content_bytes) != self.content_size:
                 raise ValueError("Message is too short to be valid. No valid content field was received.")
 
             if self.message_type == self.SYMMETRICAL_KEY_REQUEST_MESSAGE:
@@ -499,11 +506,17 @@ class Message:
 
     def symmetrical_key_send_message(self):
         """ Handle symmetrical key send messages """
-        if len(self.content_size) != EncryptionKeysSizes.SYMMETRIC_KEY_SIZE.value:
+        if len(self.message_content_bytes) != EncryptionKeysSizes.ENCRYPTED_SYMMETRIC_KEY_SIZE.value:
             raise ValueError("Invalid message. Symmetric key send message length must be equal to symmetric key size.")
         offset = 0
-        self.message_content = struct.unpack('<16s', self.content_bytes[
-                                                     offset: offset + EncryptionKeysSizes.SYMMETRIC_KEY_SIZE.value])[0]
+        self.message_content = struct.unpack('<128s', self.message_content_bytes[
+                                                     offset: offset + EncryptionKeysSizes.ENCRYPTED_SYMMETRIC_KEY_SIZE.value])[0]
+
+        hex_str = " ".join(f"{byte:02x}" for byte in self.message_content)
+        print(f"Raw Data ({len(self.message_content)} bytes): {hex_str}")
+        print()
+        print(self.message_content)
+
         if len(self.message_content) != self.content_size:
             raise ValueError("Invalid message. Symmetric key send message length must be equal to symmetric key size.")
 
@@ -562,9 +575,10 @@ class Request:
 
             # gather the client version
             self.client_version = struct.unpack('<B', self.request[
-                                                      self.offset:self.offset + RequestOffset.CLIENT_VERSION_SIZE.value])[
-                0]
+                                                      self.offset:self.offset + RequestOffset.CLIENT_VERSION_SIZE.value])[0]
             self.offset += RequestOffset.CLIENT_VERSION_SIZE.value
+
+            print(f"DEBUG client version: {self.client_version}")
 
             if len(self.request) < self.offset + RequestOffset.REQUEST_CODE_SIZE.value:
                 # Check that we received a valid request code field
@@ -575,6 +589,7 @@ class Request:
             self.request_code = struct.unpack(
                 '<H', self.request[self.offset:self.offset + RequestOffset.REQUEST_CODE_SIZE.value])[0]
             self.offset += RequestOffset.REQUEST_CODE_SIZE.value
+            print(f"DEBUG request code: {self.request_code}")
 
             # TODO add length validation for all "size" fields followed by payload, like in the next example:
             """
@@ -767,15 +782,17 @@ class ClientManager:
                     return
 
                 content_bytes = b""
-                if self.request.message.content_size > self.CHUNK_SIZE:
-                    chunk = self.socket.recv(self.CHUNK_SIZE)
-                    while chunk:
-                        content_bytes += chunk
-                        chunk = self.socket.recv(self.CHUNK_SIZE)
+                remaining_bytes = self.request.message.content_size
 
-                    self.request.message.message_content_bytes = content_bytes
-                else:
-                    self.request.message.message_content_bytes = self.socket.recv(self.request.message.content_size)
+                while remaining_bytes > 0:
+                    chunk = self.socket.recv(remaining_bytes)
+                    if not chunk:
+                        raise ValueError("Connection closed before receiving full content.")
+
+                    content_bytes += chunk
+                    remaining_bytes -= len(chunk)
+
+                self.request.message.message_content_bytes = content_bytes
 
                 self.request.message.parse_message_content()
 
