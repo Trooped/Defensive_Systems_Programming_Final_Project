@@ -34,7 +34,6 @@ RegisterRequest::RegisterRequest(std::array<uint8_t, 16> client_id, uint8_t vers
 
 void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 
-	cout << "DEBUG: reached here\n";
 
 	boost::asio::streambuf buffer;
 	std::ostream request_stream(&buffer);
@@ -50,7 +49,6 @@ void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>&
 
 
 	std::string temp_name = client_name;
-	cout << "DEBUG: temp name is " << temp_name << endl;
 	// Pad the temp name with '\0'
 	while (temp_name.length() < ProtocolConstants::CLIENT_NAME_SIZE) {
 		temp_name += '\0';
@@ -60,14 +58,11 @@ void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>&
 
 	request_stream.write(reinterpret_cast<const char*>(public_key.data()), public_key.size());
 
-	cout << "DEBUG: written : " << temp_name << endl;
-
 	try {
 		boost::asio::write(*socket, buffer);
-		cout << "DEBUG: Request sent successfully\n";
 	}
 	catch (const std::exception& e) {
-		cerr << "ERROR: Failed to send request: " << e.what() << endl;
+		cerr << "Failed to send request: " << e.what() << endl;
 	}
 }
 
@@ -87,7 +82,12 @@ void basicRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& so
 	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
 	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
 
-	boost::asio::write(*socket, buffer);
+	try {
+		boost::asio::write(*socket, buffer);
+	}
+	catch (const std::exception& e) {
+		cerr << "Failed to send request: " << e.what() << endl;
+	}
 }
 
 PublicKeyRequest::PublicKeyRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id)
@@ -107,7 +107,12 @@ void PublicKeyRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), target_client_id.size());
 
-	boost::asio::write(*socket, buffer);
+	try {
+		boost::asio::write(*socket, buffer);
+	}
+	catch (const std::exception& e) {
+		cerr << "Failed to send request: " << e.what() << endl;
+	}
 }
 
 
@@ -132,7 +137,12 @@ void Message::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket)
 	uint32_t content_size_con = boost::endian::native_to_little(message_content_size);
 	request_stream.write(reinterpret_cast<const char*>(&content_size_con), sizeof(message_content_size));
 
-	boost::asio::write(*socket, buffer);
+	try {
+		boost::asio::write(*socket, buffer);
+	}
+	catch (const std::exception& e) {
+		cerr << "Failed to send request: " << e.what() << endl;
+	}
 }
 
 symmetricKeyRequestMessage::symmetricKeyRequestMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size)
@@ -158,7 +168,12 @@ void symmetricKeyRequestMessage::sendRequest(std::shared_ptr<boost::asio::ip::tc
 
 	// No content sent
 
-	boost::asio::write(*socket, buffer);
+	try {
+		boost::asio::write(*socket, buffer);
+	}
+	catch (const std::exception& e) {
+		cerr << "Failed to send request: " << e.what() << endl;
+	}
 }
 
 
@@ -185,7 +200,12 @@ void symmetricKeySendMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::
 	
 	request_stream.write(reinterpret_cast<const char*>(&encrypted_symmetric_key), sizeof(encrypted_symmetric_key));
 
-	boost::asio::write(*socket, buffer);
+	try {
+		boost::asio::write(*socket, buffer);
+	}
+	catch (const std::exception& e) {
+		cerr << "Failed to send request: " << e.what() << endl;
+	}
 }
 
 textMessage::textMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content)
@@ -211,7 +231,12 @@ void textMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& soc
 
 	request_stream.write(reinterpret_cast<const char*>(&message_content), message_content_size);
 
-	boost::asio::write(*socket, buffer);
+	try {
+		boost::asio::write(*socket, buffer);
+	}
+	catch (const std::exception& e) {
+		cerr << "Failed to send request: " << e.what() << endl;
+	}
 }
 
 FileSendMessage::FileSendMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> file_content)
@@ -237,7 +262,12 @@ void FileSendMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>&
 
 	request_stream.write(reinterpret_cast<const char*>(&file_content), message_content_size);
 
-	boost::asio::write(*socket, buffer);
+	try {
+		boost::asio::write(*socket, buffer);
+	}
+	catch (const std::exception& e) {
+		cerr << "Failed to send request: " << e.what() << endl;
+	}
 }
 
 
@@ -254,7 +284,6 @@ RegisterResponse::RegisterResponse(uint8_t version, uint16_t response_code, uint
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> RegisterResponse::getClientID() {
 	return client_id;
 }
-
 
 ClientsListResponse::ClientsListResponse(uint8_t version, uint16_t response_code, uint32_t payload_size)
 	: BaseResponse(version, response_code, payload_size) { }
@@ -298,12 +327,21 @@ bool ClientHandler::setSymmetricKey(const std::string& client_id, const std::arr
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientIDByName(const std::string& name) {
 	for (const auto& it : clients) {
-		if (trim(it.second.client_name) == trim(name)) {
+		if (it.second.client_name == name) {
 			return stringToArrayID(it.first);  // Return client_id as array
 		}
 	}
 	throw std::runtime_error("Can't find " + name + " inside clients list, please check the name again, or ask for clients list again.");
 }
+
+int ClientHandler::numOfClients() const {
+	int ctr = 0;
+	for (const auto& it : clients) {
+		ctr++;
+	}
+	return ctr;
+}
+
 
 std::optional<ClientInfo> ClientHandler::getClient(const std::string& client_id) const {
 	auto it = clients.find(client_id);
@@ -482,12 +520,6 @@ std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArrayPubKey(cons
 	return arr;
 }
 
-/* TODO delete later????????????*/
-std::string trim(const std::string& str) {
-	auto start = str.find_first_not_of(" \t\n\r");
-	auto end = str.find_last_not_of(" \t\n\r");
-	return (start == std::string::npos) ? "" : str.substr(start, end - start + 1);
-}
 
 bool containsOnlyASCII(const std::string& name) {
 	for (auto c : name) {
@@ -610,7 +642,6 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClient
 	}
 
 	ClientHandler& handler = ClientHandler::getInstance();
-	handler.printClients();
 
 	std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id = handler.getClientIDByName(dest_client_name); // Throws an error if the name isn't found.
 	return client_id;
@@ -769,7 +800,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				boost::system::error_code ec;
 				size_t message_header_bytes = boost::asio::read(*socket, buffer, boost::asio::transfer_exactly(ProtocolConstants::MESSAGE_HEADER_SIZE), ec);
 				if (ec == boost::asio::error::eof) {
-					std::cout << "DEBUG: Server closed connection. No more messages." << std::endl;
+					std::cout << "Server closed connection, No more messages." << std::endl;
 					break;  // Stop reading, no more data coming
 				}
 				else if (ec) {
@@ -818,14 +849,15 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				std::vector<uint8_t> message_content(message_content_size);
 				input_stream.read(reinterpret_cast<char*>(message_content.data()), message_content_size);
 
+
 				// Printing the message
-				cout << "From: " << handler.getClient(handler.arrayToStringID(client_id))->client_name << endl;
-				cout << "Content: " << endl;
+				std::cout << "From: " << handler.getClient(handler.arrayToStringID(client_id))->client_name << endl;
+				std::cout << "Content: " << endl;
 				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
-					cout << "Request For Symmetrical Key" << endl;
+					std::cout << "Request For Symmetrical Key" << endl;
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_SYMMETRICAL_KEY) {
-					cout << "Symmetrical Key Received" << endl;
+					std::cout << "Symmetrical Key Received" << endl;
 
 					// Copying the vector into an array of uint8_t for the symmetric key
 					std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key = {};  // Zero-initialize
@@ -835,66 +867,88 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 					handler.setSymmetricKey(handler.arrayToStringID(client_id), symmetric_key);
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_TEXT_MESSAGE) {
-					// TODO if there's no symmetrical key or *it isn't valid* (how to check that???), we need to write "can't decrypt message".
 					if ((handler.getClient(handler.arrayToStringID(client_id))->symmetric_key).has_value()) {
-						// Using the symmetric key to decrypt the text message.
-						std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(client_id))->symmetric_key.value();
-						AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
+						try {
+							// Using the symmetric key to decrypt the text message.
+							std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(client_id))->symmetric_key.value();
+							AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
 
-						std::string message_content_string(message_content.begin(), message_content.end());
-						std::string decrypted_text = aes.decrypt(message_content_string.c_str(), message_content_string.length());
+							std::string message_content_string(message_content.begin(), message_content.end());
+							std::string decrypted_text = aes.decrypt(message_content_string.c_str(), message_content_string.length());
 
-						cout << decrypted_text << endl; // TODO is it enough? maybe divide by lines??
+							std::cout << decrypted_text << endl; // TODO is it enough? maybe divide by lines??
+						} catch (const CryptoPP::Exception& e) {
+							std::cout << "Can't decrypt message.\n";
+							continue;  // Skip to the next iteration if decryption fails
+						} catch (const std::exception& e) {
+							std::cerr << "Unexpected error: " << e.what() << std::endl;
+							continue;
+						} catch (...) {
+							std::cerr << "Unknown error occurred while processing the file." << std::endl;
+							continue;
+						}
 					}
 					else {
-						cout << "Can't decrypt message.\n";
+						std::cout << "Can't decrypt message.\n";
 					}
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_FILE_MESSAGE) {
 					if ((handler.getClient(handler.arrayToStringID(client_id))->symmetric_key).has_value()) {
-						// Using the symmetric key to decrypt the file content message.
-						std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(client_id))->symmetric_key.value();
-						AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
+						try {
+							// Using the symmetric key to decrypt the file content message.
+							std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(client_id))->symmetric_key.value();
+							AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
 
-						std::string file_content_string(message_content.begin(), message_content.end());
-						std::string decrypted_file_content= aes.decrypt(file_content_string.c_str(), file_content_string.length());
+							std::string file_content_string(message_content.begin(), message_content.end());
+							std::string decrypted_file_content = aes.decrypt(file_content_string.c_str(), file_content_string.length());
 
+							char* tmpDir = nullptr;
+							size_t len = 0;
 
-						char* tmpDir = nullptr;
-						size_t len = 0;
+							if (_dupenv_s(&tmpDir, &len, "TMP") != 0 || tmpDir == nullptr) {
+								std::cerr << "TMP environment variable not found, can't save the file." << std::endl;
+								continue;
+							}
 
-						if (_dupenv_s(&tmpDir, &len, "TMP") != 0 || tmpDir == nullptr) {
-							std::cerr << "TMP environment variable not found, can't save the file." << std::endl;
-							continue;
-						}
+							// Generate a secure temporary filename using tmpnam_s
+							char tmpFilename[L_tmpnam];
+							if (tmpnam_s(tmpFilename, L_tmpnam) != 0) {
+								std::cerr << "Could not generate temporary filename, can't save the file." << std::endl;
+								free(tmpDir);
+								continue;
+							}
 
-						// Generate a secure temporary filename using tmpnam_s
-						char tmpFilename[L_tmpnam];
-						if (tmpnam_s(tmpFilename, L_tmpnam) != 0) {
-							std::cerr << "Could not generate temporary filename, can't save the file." << std::endl;
+							std::string full_path = std::string(tmpDir) + "\\" + std::string(tmpFilename); // Creating the full path for the temp file
 							free(tmpDir);
-							continue;
-						}
 
-						std::string full_path = std::string(tmpDir) + "\\" + std::string(tmpFilename); // Creating the full path for the temp file
-						std::ofstream file(full_path);
-						if (!file) {
-							std::cerr << "Could not create temp file!" << std::endl;
+							std::ofstream file(full_path, std::ios::binary);
+							if (!file) {
+								std::cerr << "Could not create temp file." << std::endl;
+								continue;
+							}
+							file << decrypted_file_content;
+							file.close();
+							std::cout << "Received file, full path: \n" << full_path << "\n";
+						}catch (const CryptoPP::Exception& e) {
+							std::cout << "Can't decrypt file content.\n";
+							continue;
+						}catch (const std::exception& e) {
+							std::cerr << "Unexpected error: " << e.what() << std::endl;
+							continue;
+						}catch (...) {
+							std::cerr << "Unknown error occurred while processing the file." << std::endl;
 							continue;
 						}
-						file << decrypted_file_content;
-						file.close();
-						cout << "Received file, full path: \n" << full_path << "\n";
 					}
 					else {
-						cout << "Can't decrypt file content.\n";
+						std::cout << "Can't decrypt file content.\n";
 					}
 				}
-				cout << "-----<EOM>-----" << endl;
-				cout << "\n" << endl;
+				std::cout << "-----<EOM>-----" << endl;
+				std::cout << "\n" << endl;
 
 				// TODO add a check if the payload size is correct here? or it's unneccsarily complicated?????????????????????
-				//return std::make_unique<ErrorResponse>(version, response_code, payload_size);
+				//return std::make_unique<ErrorResponse>(version, response_code, payload_size); if it is
 			}
 			socket->close();
 			return std::make_unique<WaitingMessagesFetchResponse>(version, response_code, payload_size);
@@ -955,8 +1009,6 @@ void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManag
 	);
 
 	auto socket = serverConnection.connectToServer();
-
-	cout << "DEBUG: created a socket\n";
 
 	// Send the registration request
 	request->sendRequest(socket);
@@ -1064,20 +1116,20 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
 
-			std::string text_input;
-			cout << "Please enter the required text message to send: \n";
-			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
-			std::getline(std::cin, text_input);
-
-			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
-			if (text_input.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
-				cout << "Input is too big to fit (more than 2^32 -1 characters). Truncating it to fit.\n";
-				text_input = text_input.substr(0, ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE); 
-			}
-
 			ClientHandler& handler = ClientHandler::getInstance();
 
 			if ((handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // If there is a symmetric key with another client
+				std::string text_input;
+				cout << "Please enter the required text message to send: \n";
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
+				std::getline(std::cin, text_input);
+
+				// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
+				if (text_input.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
+					cout << "Input is too big to fit (more than 2^32 -1 characters). Truncating it to fit.\n";
+					text_input = text_input.substr(0, ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE); 
+				}
+			
 				// Using the symmetric key to encrypt the text message.
 				std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key.value();
 				AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
@@ -1199,36 +1251,42 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
 
-			std::string file_path;
-			cout << "Please enter the full path to the file you want to send (ASCII only file): \n";
-			std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
-			std::getline(std::cin, file_path);
-
-			// Checking if file exists and if we can open it, throw a "file not found" if not.
-			if (!doesFileExist(file_path)) {
-				throw runtime_error("File not found");
-			}
-			std::ifstream file(file_path);
-			if (!file.is_open()) {
-				throw std::runtime_error("File not found");
-			}
-
-			// Copying the entire file into a string
-			std::stringstream buffer;
-			buffer << file.rdbuf();
-			std::string file_content = buffer.str();
-
-			file.close();
-
-			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
-			if (file_content.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
-				cout << "File is too big to fit (more than 2^32 -1 characters).\n";
-				return;
-			}
-
 			ClientHandler& handler = ClientHandler::getInstance();
 
 			if ((handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // If there is a symmetric key with another client
+				std::string file_path;
+				cout << "Please enter the full path to the file you want to send (ASCII only file): \n";
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
+				std::getline(std::cin, file_path);
+
+				// Checking if file exists and if we can open it, throw a "file not found" if not.
+				if (!doesFileExist(file_path)) {
+					throw runtime_error("File not found");
+				}
+				std::ifstream file(file_path, std::ios::binary);
+				if (!file.is_open()) {
+					throw std::runtime_error("File not found");
+				}
+
+				// Copying the entire file into a string
+				std::stringstream buffer;
+				buffer << file.rdbuf();
+				std::string file_content = buffer.str();
+
+				file.close();
+
+				if (!containsOnlyASCII(file_content)) {
+					cout << "File contains unsupported, non-ascii characters. Can't send it.";
+					return;
+				}
+
+				// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
+				if (file_content.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
+					cout << "File is too big to fit (more than 2^32 -1 characters).\n";
+					return;
+				}
+
+			
 				// Using the symmetric key to encrypt the text message.
 				std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key.value();
 				AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);

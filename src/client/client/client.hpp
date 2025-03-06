@@ -310,6 +310,8 @@ public:
 
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientIDByName(const std::string& name);
 
+    int numOfC
+
     // Get Client (Returns std::optional)
     std::optional<ClientInfo> getClient(const std::string& client_id) const;
 
@@ -340,10 +342,6 @@ public:
     std::string getIP() const { return ip; }
     std::string getPort() const { return port; }
 };
-
-/* More functions*/
-std::string trim(const std::string& str);
-
 
 
 /*
