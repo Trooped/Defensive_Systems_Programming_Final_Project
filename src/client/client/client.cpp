@@ -472,7 +472,6 @@ std::shared_ptr<tcp::socket> ServerConnectionManager::connectToServer() {
 
 			socket = std::make_shared<boost::asio::ip::tcp::socket>(io_context);
 			boost::asio::connect(*socket, endpoints);
-			cout << "DEBUG: connected to socket\n";
 		}
 		catch (const std::exception& e) {
 			throw std::runtime_error("Failed to connect to server: " + std::string(e.what()));
@@ -696,6 +695,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
 
 			socket->close();
+			cout << "Register operation is successful.\n";
 			return std::make_unique<RegisterResponse>(version, response_code, payload_size, client_id);
 		}
 		else if (response_code == ProtocolConstants::Response::CLIENT_LIST_FETCH_SUCCESS) {
@@ -705,6 +705,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			ClientHandler& handler = ClientHandler::getInstance();
 
 			if (num_of_clients > 0) {
+				cout << "Client list request is successful.\n";
 				cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
 
 				for (size_t i = 0; i < num_of_clients; i++) {
@@ -763,6 +764,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			handler.setPublicKey(handler.arrayToStringID(client_id), public_key);
 
 			socket->close();
+			cout << "Public key of client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\" was fetched from the server and saved.\n";
 			return std::make_unique<PublicKeyResponse>(version, response_code, payload_size, client_id, public_key);
 		}
 		else if (response_code == ProtocolConstants::Response::MESSAGE_SENT_SUCCESS) {
@@ -788,7 +790,10 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 			boost::endian::little_to_native_inplace(message_id);
 
+			ClientHandler& handler = ClientHandler::getInstance();
+
 			socket->close();
+			cout << "Message sent to client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\".\n";
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
 		}
 		else if (response_code == ProtocolConstants::Response::FETCHING_INCOMING_MESSAGES_SUCCESS) {
@@ -854,14 +859,24 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				std::cout << "From: " << handler.getClient(handler.arrayToStringID(client_id))->client_name << endl;
 				std::cout << "Content: " << endl;
 				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
-					std::cout << "Request For Symmetrical Key" << endl;
+					std::cout << "Request For Symmetric Key" << endl;
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_SYMMETRICAL_KEY) {
-					std::cout << "Symmetrical Key Received" << endl;
+					std::cout << "Symmetric Key Received" << endl;
 
-					// Copying the vector into an array of uint8_t for the symmetric key
+					// Copying the vector which contains an encrypted symmetric key into a string
+					std::string encryptedSymmetricKey(message_content.begin(), message_content.end());
+
+					// Gathering the decoded private key.
+					std::string decoded_priv_key = Base64Wrapper::decode(fetchPrivateKeyFromFile());
+					RSAPrivateWrapper rsaDecryptor(decoded_priv_key);
+
+					// Decrypting the symmetric key
+					std::string decryptedSymmetricKey = rsaDecryptor.decrypt(encryptedSymmetricKey);
+
+					// Copying the string into an array of uint8_t
 					std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key = {};  // Zero-initialize
-					std::copy_n(message_content.begin(), std::min(message_content.size(), ProtocolConstants::SYMMETRIC_KEY_SIZE), symmetric_key.begin());
+					std::copy_n(decryptedSymmetricKey.begin(), std::min(decryptedSymmetricKey.size(), ProtocolConstants::SYMMETRIC_KEY_SIZE), symmetric_key.begin());
 
 					// Saves the symmetric key for this client.
 					handler.setSymmetricKey(handler.arrayToStringID(client_id), symmetric_key);
@@ -975,7 +990,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManager& serverConnection) {
 	const string filename = "me.info";
 	if (doesFileExist(filename)) {
-		throw std::runtime_error("Warning: me.info file already exists, cancelling sign up operation.");
+		throw std::runtime_error("me.info file already exists, cancelling register operation.");
 	}
 
 	string username;
@@ -1024,7 +1039,7 @@ void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManag
 		CreateClientInfoFile(filename, username, clientID, priv_base64key);
 	}
 	else {
-		throw std::runtime_error("Error: Expected RegisterResponse, but received a different response type.");
+		throw std::runtime_error("Expected RegisterResponse, but received a different response type.");
 	}
 
 	cout << "New client details are saved in me.info file." << endl;
@@ -1035,6 +1050,8 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 	try {
 		std::unique_ptr<BaseRequest> request;
 		std::unique_ptr<BaseResponse> response;
+
+		cout << "\n";
 
 		switch (operation_code) {
 		case ProtocolConstants::Input_Codes::REGISTER:
@@ -1239,7 +1256,7 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 				}
 			}
 			else {
-				cout << "You already have a symmetric key with this client.\n";
+				cout << "You already have a shared symmetric key with this client.\n";
 				return;
 			}
 			break;
@@ -1323,7 +1340,7 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 		}
 	}
 	catch (const std::exception& e) {
-		std::cerr << "Error handling client request: " << e.what() << "\n";
+		std::cerr << "Error while handling request: " << e.what() << "\n";
 	}
 	return;
 }
@@ -1339,6 +1356,8 @@ int main() {
 			cout << "110) Register\n120) Request for clients list\n130) Request for public key\n140) Request for waiting messages" << endl;
 			cout << "150) Send a text message\n151) Send a request for symmetric key\n152) Send your symmetric key\n153) Send a file\n0) Exit client\n?" << endl;
 			if (cin >> responseCode) {
+				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Clear newline
+
 				if (responseCode == ProtocolConstants::Input_Codes::EXIT_CLIENT) {
 					cout << "\nThanks for using MessageU!" << endl;
 					break;

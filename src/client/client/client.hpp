@@ -310,7 +310,7 @@ public:
 
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientIDByName(const std::string& name);
 
-    int numOfC
+    int numOfClients() const;
 
     // Get Client (Returns std::optional)
     std::optional<ClientInfo> getClient(const std::string& client_id) const;
