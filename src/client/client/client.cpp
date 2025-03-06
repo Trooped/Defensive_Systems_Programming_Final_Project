@@ -280,8 +280,22 @@ void ClientHandler::addClient(const std::string& client_id, const std::string& c
 
 bool ClientHandler::setPublicKey(const std::string& client_id, const std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& public_key) {
 	auto it = clients.find(client_id);
+	cout << "DEBUG: " << public_key.data() << endl;
 	if (it != clients.end()) {
-		it->second.public_key = public_key;
+		it->second.public_key = std::make_optional(public_key);
+
+		if (it->second.public_key.has_value()) {
+			std::cout << "DEBUG: Stored Key: ";
+			for (auto byte : it->second.public_key.value()) {
+				std::cout << std::hex << static_cast<int>(byte) << " ";
+			}
+			std::cout << std::endl;
+		}
+		else {
+			std::cout << "DEBUG ERROR: Public Key not stored!\n";
+		}
+
+		ClientHandler::printClients();
 		return true;
 	}
 	return false; // Client not found
@@ -291,6 +305,7 @@ bool ClientHandler::setSymmetricKey(const std::string& client_id, const std::arr
 	auto it = clients.find(client_id);
 	if (it != clients.end()) {
 		it->second.symmetric_key = symmetric_key;
+		ClientHandler::printClients();
 		return true;
 	}
 	return false; // Client not found
@@ -298,9 +313,7 @@ bool ClientHandler::setSymmetricKey(const std::string& client_id, const std::arr
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientIDByName(const std::string& name) {
 	for (const auto& it : clients) {
-		std::cout << it.first << std::endl;
-		std::cout << it.second.client_name << std::endl;
-		if (it.second.client_name == name) {
+		if (trim(it.second.client_name) == trim(name)) {
 			return stringToArrayID(it.first);  // Return client_id as array
 		}
 	}
@@ -310,6 +323,7 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientI
 std::optional<ClientInfo> ClientHandler::getClient(const std::string& client_id) const {
 	auto it = clients.find(client_id);
 	if (it != clients.end()) {
+		ClientHandler::printClients();
 		return it->second;
 	}
 	return std::nullopt; // Client not found
@@ -484,6 +498,13 @@ std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArrayPubKey(cons
 	return arr;
 }
 
+/* TODO delete later????????????*/
+std::string trim(const std::string& str) {
+	auto start = str.find_first_not_of(" \t\n\r");
+	auto end = str.find_last_not_of(" \t\n\r");
+	return (start == std::string::npos) ? "" : str.substr(start, end - start + 1);
+}
+
 bool containsOnlyASCII(const std::string& name) {
 	for (auto c : name) {
 		if (static_cast<unsigned char>(c) > 127) {
@@ -597,7 +618,8 @@ std::string fetchPrivateKeyFromFile() {
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
 	std::string dest_client_name;
 	cout << "Please enter client name: ";
-	cin >> dest_client_name;
+	std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
+	std::getline(std::cin, dest_client_name);
 	if (!isValidClientName(dest_client_name)) {
 		throw runtime_error("Invalid client name.");
 	}
@@ -682,10 +704,11 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client name");
 				}
 				buffer.commit(ProtocolConstants::CLIENT_NAME_SIZE);
-				std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_name_arr;
-				input_stream.read(reinterpret_cast<char*>(&client_name_arr), ProtocolConstants::CLIENT_ID_SIZE);
+				std::array<uint8_t, ProtocolConstants::CLIENT_NAME_SIZE> client_name_arr;
+				input_stream.read(reinterpret_cast<char*>(client_name_arr.data()), ProtocolConstants::CLIENT_NAME_SIZE);
 
 				std::string client_name(client_name_arr.begin(), client_name_arr.end()); // Copy the array from uint8_t form to char array (to string).
+				client_name.erase(std::find(client_name.begin(), client_name.end(), '\0'), client_name.end()); // Trim trailing nulls
 
 				handler.addClient(handler.arrayToStringID(client_id), client_name);
 				cout << i + 1 << ". " << client_name << endl;
@@ -713,7 +736,10 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			}
 			buffer.commit(ProtocolConstants::PUBLIC_KEY_SIZE);
 			std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
-			input_stream.read(reinterpret_cast<char*>(&public_key), ProtocolConstants::PUBLIC_KEY_SIZE);
+			input_stream.read(reinterpret_cast<char*>(public_key.data()), ProtocolConstants::PUBLIC_KEY_SIZE);
+
+			ClientHandler& handler = ClientHandler::getInstance();
+			handler.setPublicKey(handler.arrayToStringID(client_id), public_key);
 
 			socket->close();
 			return std::make_unique<PublicKeyResponse>(version, response_code, payload_size, client_id, public_key);
@@ -908,7 +934,8 @@ void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManag
 
 	string username;
 	cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
-	cin >> username;
+	std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Flush leftover newline
+	std::getline(std::cin, username);
 	if (!isValidClientName(username)) {
 		cout << "Invalid client name." << endl;
 		return;

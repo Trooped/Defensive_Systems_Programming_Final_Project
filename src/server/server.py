@@ -892,7 +892,7 @@ class Response:
             self.socket.sendall(fmt_id + fmt_name)
 
     def public_key_response(self, target_client_id, public_key):
-        self.response_code = ResponseType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST_SUCCESS
+        self.response_code = ResponseType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST_SUCCESS.value
         self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.PUBLIC_KEY_SIZE.value
         self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
         self.socket.sendall(self.response)
@@ -1033,7 +1033,7 @@ class Server:
                     self._remove_client(sock)
                 else:
                     print(f"Closing connection after response for client {sock.fileno()}")
-                    self._remove_client(sock)  # ✅ Always close after one response
+                    self._remove_client(sock)  # Always close after one response
             except (ConnectionResetError, BrokenPipeError):
                 print(f"Client {sock.fileno()} crashed or lost connection.")
                 self._remove_client(sock)

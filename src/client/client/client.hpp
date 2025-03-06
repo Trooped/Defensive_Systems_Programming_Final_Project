@@ -341,6 +341,9 @@ public:
     std::string getPort() const { return port; }
 };
 
+/* More functions*/
+std::string trim(const std::string& str);
+
 
 
 /*
