@@ -151,7 +151,7 @@ protected:
 public:
     BaseRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
     virtual ~BaseRequest() = default;
-    virtual void sendRequest(tcp::socket& socket) const;
+    virtual void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const;
 };
 
 class RegisterRequest : public BaseRequest {
@@ -160,21 +160,21 @@ protected:
     std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
 public:
     RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
 // No extra attributes, and payload size = 0. Relevant to 601 (clients list) & 604 (fetch waiting messages) request codes
 class basicRequest : public BaseRequest {
 public:
     basicRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
 class PublicKeyRequest : public BaseRequest {
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id;
 public:
     PublicKeyRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
 
@@ -185,7 +185,7 @@ protected:
     uint32_t message_content_size;
 public:
     Message(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
 
@@ -193,7 +193,7 @@ class symmetricKeyRequestMessage : public Message {
 
 public:
     symmetricKeyRequestMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 
 };
 
@@ -202,21 +202,21 @@ protected:
     std::string encrypted_symmetric_key;
 public:
     symmetricKeySendMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
 class textMessage : public Message {
     std::vector<uint8_t> message_content;
 public:
     textMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
 class FileSendMessage : public Message {
     std::vector<uint8_t> file_content;
 public:
     FileSendMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> file_content);
-    void sendRequest(tcp::socket& socket);
+    void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
 
@@ -297,21 +297,24 @@ public:
     }
 
     // Add Client (Only ID + Name Initially)
-    void addClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+    void addClient(const std::string& client_id,
         const std::string& client_name);
 
     // Set Public Key
-    bool setPublicKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+    bool setPublicKey(const std::string& client_id,
         const std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& public_key);
 
     // Set Symmetric Key
-    bool setSymmetricKey(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id,
+    bool setSymmetricKey(const std::string& client_id,
         const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key);
 
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientIDByName(const std::string& name);
 
     // Get Client (Returns std::optional)
-    std::optional<ClientInfo> getClient(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id) const;
+    std::optional<ClientInfo> getClient(const std::string& client_id) const;
+
+    std::string arrayToStringID(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& arr);
+    std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToArrayID(const std::string& str);
 
     // Print All Clients (Debugging)
     void printClients() const;
@@ -326,8 +329,8 @@ class ServerConnectionManager {
 public:
     ServerConnectionManager(); // Constructor reads IP & Port
 
-    bool isPortValid(const string& port);
-    bool isIPvalid(const string& ip);
+    bool isPortValid(const std::string& tmp_port);
+    bool isIPvalid(const std::string& tmp_ip);
     void clearFileAndResetPointer(std::ifstream& file);
     std::string readIPfromFile(const std::string& line);
     std::string readPortfromFile(const std::string& line);

@@ -870,7 +870,8 @@ class Response:
     def register_response(self, client_id):
         self.response_code = ResponseType.CLIENT_REGISTER_REQUEST_SUCCESS.value
         self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value
-        self.response = struct.pack("<BHI 16s", self.version, self.response_code, self.payload_size, client_id)
+        client_id_bytes = client_id.bytes
+        self.response = struct.pack("<BHI 16s", self.version, self.response_code, self.payload_size, client_id_bytes)
 
         self.socket.sendall(self.response)
 
@@ -1025,13 +1026,17 @@ class Server:
         client = self.clients.get(sock.fileno())
 
         if client:
-            success = client.handle_request(sock, mask)
-
-            # If the client disconnects, remove it from tracking
-            if not success:
-                print(f"Client {sock.fileno()} disconnected, cleaning up.")
+            try:
+                success = client.handle_request(sock, mask)
+                if not success:
+                    print(f"Client {sock.fileno()} disconnected.")
+                    self._remove_client(sock)
+                else:
+                    print(f"Closing connection after response for client {sock.fileno()}")
+                    self._remove_client(sock)  # ✅ Always close after one response
+            except (ConnectionResetError, BrokenPipeError):
+                print(f"Client {sock.fileno()} crashed or lost connection.")
                 self._remove_client(sock)
-
         else:
             print(f"WARNING: No client associated with socket {sock.fileno()}")
             self._remove_client(sock)
