@@ -280,22 +280,8 @@ void ClientHandler::addClient(const std::string& client_id, const std::string& c
 
 bool ClientHandler::setPublicKey(const std::string& client_id, const std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& public_key) {
 	auto it = clients.find(client_id);
-	cout << "DEBUG: " << public_key.data() << endl;
 	if (it != clients.end()) {
 		it->second.public_key = std::make_optional(public_key);
-
-		if (it->second.public_key.has_value()) {
-			std::cout << "DEBUG: Stored Key: ";
-			for (auto byte : it->second.public_key.value()) {
-				std::cout << std::hex << static_cast<int>(byte) << " ";
-			}
-			std::cout << std::endl;
-		}
-		else {
-			std::cout << "DEBUG ERROR: Public Key not stored!\n";
-		}
-
-		ClientHandler::printClients();
 		return true;
 	}
 	return false; // Client not found
@@ -305,7 +291,6 @@ bool ClientHandler::setSymmetricKey(const std::string& client_id, const std::arr
 	auto it = clients.find(client_id);
 	if (it != clients.end()) {
 		it->second.symmetric_key = symmetric_key;
-		ClientHandler::printClients();
 		return true;
 	}
 	return false; // Client not found
@@ -323,7 +308,6 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::getClientI
 std::optional<ClientInfo> ClientHandler::getClient(const std::string& client_id) const {
 	auto it = clients.find(client_id);
 	if (it != clients.end()) {
-		ClientHandler::printClients();
 		return it->second;
 	}
 	return std::nullopt; // Client not found
@@ -688,30 +672,35 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			// Access the singleton global ClientHandler instance
 			ClientHandler& handler = ClientHandler::getInstance();
 
-			cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
+			if (num_of_clients > 0) {
+				cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
 
-			for (size_t i = 0; i < num_of_clients; i++) {
-				size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
-				if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
-					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
+				for (size_t i = 0; i < num_of_clients; i++) {
+					size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
+					if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
+						throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
+					}
+					buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+					std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
+					input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
+
+					size_t name_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_NAME_SIZE));
+					if (name_bytes < ProtocolConstants::CLIENT_NAME_SIZE) {
+						throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client name");
+					}
+					buffer.commit(ProtocolConstants::CLIENT_NAME_SIZE);
+					std::array<uint8_t, ProtocolConstants::CLIENT_NAME_SIZE> client_name_arr;
+					input_stream.read(reinterpret_cast<char*>(client_name_arr.data()), ProtocolConstants::CLIENT_NAME_SIZE);
+
+					std::string client_name(client_name_arr.begin(), client_name_arr.end()); // Copy the array from uint8_t form to char array (to string).
+					client_name.erase(std::find(client_name.begin(), client_name.end(), '\0'), client_name.end()); // Trim trailing nulls
+
+					handler.addClient(handler.arrayToStringID(client_id), client_name);
+					cout << i + 1 << ". " << client_name << endl;
 				}
-				buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
-				std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-				input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
-
-				size_t name_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_NAME_SIZE));
-				if (name_bytes < ProtocolConstants::CLIENT_NAME_SIZE) {
-					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client name");
-				}
-				buffer.commit(ProtocolConstants::CLIENT_NAME_SIZE);
-				std::array<uint8_t, ProtocolConstants::CLIENT_NAME_SIZE> client_name_arr;
-				input_stream.read(reinterpret_cast<char*>(client_name_arr.data()), ProtocolConstants::CLIENT_NAME_SIZE);
-
-				std::string client_name(client_name_arr.begin(), client_name_arr.end()); // Copy the array from uint8_t form to char array (to string).
-				client_name.erase(std::find(client_name.begin(), client_name.end(), '\0'), client_name.end()); // Trim trailing nulls
-
-				handler.addClient(handler.arrayToStringID(client_id), client_name);
-				cout << i + 1 << ". " << client_name << endl;
+			}
+			else { // 0 clients
+				cout << "No other clients in server.\n";
 			}
 
 			socket->close();
@@ -774,14 +763,16 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			// Access the singleton global ClientHandler instance
 			ClientHandler& handler = ClientHandler::getInstance();
 			cout << "Printing the incoming messages: " << endl;
+
 			while (true) {
-				size_t message_header_bytes = boost::asio::read(*socket, buffer, boost::asio::transfer_exactly(ProtocolConstants::MESSAGE_HEADER_SIZE));
-				if (message_header_bytes == 0) {
-					std::cout << "No more messages. Stopping.\n";
-					break;
+				boost::system::error_code ec;
+				size_t message_header_bytes = boost::asio::read(*socket, buffer, boost::asio::transfer_exactly(ProtocolConstants::MESSAGE_HEADER_SIZE), ec);
+				if (ec == boost::asio::error::eof) {
+					std::cout << "DEBUG: Server closed connection. No more messages." << std::endl;
+					break;  // Stop reading, no more data coming
 				}
-				else if (message_header_bytes != ProtocolConstants::MESSAGE_HEADER_SIZE){
-					throw std::runtime_error("Received invalid message header.");
+				else if (ec) {
+					throw std::runtime_error("Error while reading: " + ec.message());
 				}
 
 				buffer.commit(ProtocolConstants::MESSAGE_HEADER_SIZE);

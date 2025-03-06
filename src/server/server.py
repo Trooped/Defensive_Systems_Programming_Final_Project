@@ -374,7 +374,7 @@ class Database:
                     messages.append([from_client_id, message_id, message_type, content])
 
             # Delete the messages after fetching
-            self.delete_messages_by_to_client(to_client_id)
+            self.delete_messages_to_client(to_client_id)
         except Exception as e:
             print(f"ERROR: Failed to fetch messages for to_client ID '{to_client_id}': {e}")
         finally:
@@ -382,7 +382,7 @@ class Database:
 
         return messages
 
-    def delete_messages_by_to_client(self, to_client_id: bytes) -> None:
+    def delete_messages_to_client(self, to_client_id: bytes) -> None:
         """
         Delete all messages for a given to_client ID.
         """
@@ -449,6 +449,7 @@ class Message:
         # self.parse_message()
 
     def parse_basic_message(self):
+        print("DEBUG: basic message bytes = " + str(self.basic_message_bytes))
         if len(self.basic_message_bytes) < MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value:
             raise ValueError("Message is too short to be valid. No valid client id field was received.")
 
@@ -757,8 +758,9 @@ class ClientManager:
                 self.request.parse_payload()
             elif self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:  # case 603
                 message_bytes = self.socket.recv(MessageOffset.MIN_MESSAGE_SIZE.value)
+                print("DEBUG: message_bytes: ", message_bytes)
                 if message_bytes:
-                    self.request.message = Message(message_bytes)
+                    self.request.message = Message(message_bytes=message_bytes)
                 else:
                     # TODO send an error response?????
                     print("ERROR ERROR")
@@ -821,8 +823,8 @@ class ClientManager:
         response.client_list_response(clients_list)
 
     def incoming_messages_request(self):
-        name = self.db.get_username_by_uuid(self.request.client_id)
-        messages_list = self.db.fetch_all_registered_messages(name)
+        # name = self.db.get_username_by_uuid(self.request.client_id) TODO delete
+        messages_list = self.db.fetch_messages_to_client(self.request.client_id)
         response = Response(self.socket)
         response.fetching_messages_response(messages_list)
 
@@ -843,7 +845,7 @@ class ClientManager:
         response.public_key_response(self.request.target_client_id, public_key_other_client)
 
     def send_message_request(self):
-        from_client_id = self.client_id
+        from_client_id = self.request.client_id
         target_client_id = self.request.message.target_client_id
         message_type = self.request.message.message_type
         message_content = self.request.message.message_content
@@ -916,6 +918,7 @@ class Response:
 
         # Calculating the payload size
         for client_id, message_id, message_type, content in messages_list:
+            content = content or b""
             self.payload_size += ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value + \
                                  ResponseFieldsSizes.MESSAGE_TYPE_SIZE.value + \
                                  ResponseFieldsSizes.MESSAGE_CONTENT_SIZE.value + len(content)
@@ -930,15 +933,17 @@ class Response:
             fmt_id = struct.pack("<16s", client_id)
             fmt_message_id = struct.pack("<I", message_id)
             fmt_message_type = struct.pack("<B", message_type)
+            content = content or b""
             fmt_message_content_size = struct.pack("<I", len(content))
 
             # Sending the message header
             self.socket.sendall(fmt_id + fmt_message_id + fmt_message_type + fmt_message_content_size)
 
-            # Sending the message
-            for i in range(0, len(content), self.CHUNK_SIZE):
-                chunk = content[i:i + self.CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
-                self.socket.sendall(chunk)  # Send the chunk
+            # Sending the message content
+            if content is not None:
+                for i in range(0, len(content), self.CHUNK_SIZE):
+                    chunk = content[i:i + self.CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
+                    self.socket.sendall(chunk)  # Send the chunk
 
     def error_response(self):
         self.response_code = ResponseType.GENERAL_ERROR.value
