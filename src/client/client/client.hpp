@@ -117,7 +117,7 @@ namespace ProtocolConstants {
     // General Request Sizes
     constexpr size_t CLIENT_ID_SIZE = 16;           // Size of user ID field (16 bytes)
     constexpr size_t VERSION_SIZE = 1;           // Size of version field (1 byte)
-    constexpr size_t REQUEST_CODE_SIZE = 1;                // Size of operation code field (2 byte)
+    constexpr size_t REQUEST_CODE_SIZE = 2;                // Size of operation code field (2 byte)
     constexpr size_t PAYLOAD_FIELD_SIZE = 4;     // Size of payload field size (4 bytes) - containing the size of the following payload
     constexpr size_t CLIENT_NAME_SIZE = 255;    // Size of client name field (255 ASCII string with \n)
 

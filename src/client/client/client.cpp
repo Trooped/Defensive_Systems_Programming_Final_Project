@@ -10,7 +10,7 @@ using namespace std;
 using boost::asio::ip::tcp;
 
 //Constructors for Request & Message classes and inheriting classes.
-BaseRequest::BaseRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
+BaseRequest::BaseRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
 	: client_id{ client_id }, version{ version }, request_code{ request_code }, payload_size{ payload_size } { }
 
 void BaseRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
@@ -29,7 +29,7 @@ void BaseRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& soc
 	boost::asio::write(*socket, buffer);
 }
 
-RegisterRequest::RegisterRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key)
+RegisterRequest::RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key)
 	: BaseRequest(client_id, version, request_code, payload_size), client_name(client_name), public_key(public_key) { }
 
 void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
@@ -67,7 +67,7 @@ void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>&
 }
 
 
-basicRequest::basicRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
+basicRequest::basicRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
 	: BaseRequest(client_id, version, request_code, payload_size) { }
 void basicRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 	boost::asio::streambuf buffer;
@@ -90,7 +90,7 @@ void basicRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& so
 	}
 }
 
-PublicKeyRequest::PublicKeyRequest(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id)
+PublicKeyRequest::PublicKeyRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id)
 	: BaseRequest(client_id, version, request_code, payload_size), target_client_id(target_client_id) { }
 void PublicKeyRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 	boost::asio::streambuf buffer;
@@ -108,7 +108,7 @@ void PublicKeyRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>
 	for (size_t i = 0; i < sizeof(request_code_con); i++) {
 		std::cout << std::hex << static_cast<int>(bytes[i]) << " ";
 	}
-	std::cout << std::endl;
+	std::cout << std::dec << std::endl;
 
 	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
 	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), sizeof(payload_size));
@@ -124,7 +124,7 @@ void PublicKeyRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>
 }
 
 
-Message::Message(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size)
+Message::Message(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size)
 	: BaseRequest(client_id, version, request_code, payload_size), target_client_id(target_client_id), message_type(message_type), message_content_size(message_content_size) { }
 void Message::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 	boost::asio::streambuf buffer;
@@ -153,7 +153,7 @@ void Message::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket)
 	}
 }
 
-symmetricKeyRequestMessage::symmetricKeyRequestMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size)
+symmetricKeyRequestMessage::symmetricKeyRequestMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size)
 	: Message(client_id, version, request_code, payload_size, target_client_id, message_type, message_content_size) { }
 void symmetricKeyRequestMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 	boost::asio::streambuf buffer;
@@ -185,7 +185,7 @@ void symmetricKeyRequestMessage::sendRequest(std::shared_ptr<boost::asio::ip::tc
 }
 
 
-symmetricKeySendMessage::symmetricKeySendMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key)
+symmetricKeySendMessage::symmetricKeySendMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::string encrypted_symmetric_key)
 	: Message(client_id, version, request_code, payload_size, target_client_id, message_type, message_content_size), encrypted_symmetric_key(encrypted_symmetric_key) { }
 void symmetricKeySendMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 	boost::asio::streambuf buffer;
@@ -196,32 +196,22 @@ void symmetricKeySendMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::
 
 	uint16_t request_code_con = boost::endian::native_to_little(request_code);
 	request_stream.write(reinterpret_cast<const char*>(&request_code_con), ProtocolConstants::REQUEST_CODE_SIZE);
-	cout << "DEBUG REQUEST CODE symmetric key send : " << request_code_con << endl;
 
-	std::cout << "DEBUG: Raw Bytes Sent request code: ";
-	unsigned char* bytes = reinterpret_cast<unsigned char*>(&request_code_con);
-	for (size_t i = 0; i < sizeof(request_code_con); i++) {
-		std::cout << std::hex << static_cast<int>(bytes[i]) << " ";
-	}
-	std::cout << std::endl;
+	cout << request_code_con << endl;
+	cout << request_code << endl;
 
 	uint32_t payload_size_con = boost::endian::native_to_little(payload_size);
 	request_stream.write(reinterpret_cast<const char*>(&payload_size_con), ProtocolConstants::PAYLOAD_FIELD_SIZE);
 
 	request_stream.write(reinterpret_cast<const char*>(target_client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
+
 	request_stream.put(message_type);
 
 	uint32_t content_size_con = boost::endian::native_to_little(message_content_size);
 	request_stream.write(reinterpret_cast<const char*>(&content_size_con), ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE);
-	
-	request_stream.write(reinterpret_cast<const char*>(encrypted_symmetric_key.data()), ProtocolConstants::ENCRYPTED_SYMMETRIC_KEY_SIZE);
 
 
-	std::cout << "DEBUG: Raw Sent Encrypted Symmetric Key (Hex): ";
-	for (unsigned char c : encrypted_symmetric_key) {
-		std::cout << std::hex << (int)c << " ";
-	}
-	std::cout << std::endl;
+	request_stream.write(reinterpret_cast<const char*>(encrypted_symmetric_key.data()), message_content_size);
 
 	try {
 		boost::asio::write(*socket, buffer);
@@ -231,7 +221,7 @@ void symmetricKeySendMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::
 	}
 }
 
-textMessage::textMessage(std::array<uint8_t, 16> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content)
+textMessage::textMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size, std::vector<uint8_t> message_content)
 	: Message(client_id, version, request_code, payload_size, target_client_id, message_type, message_content_size), message_content(message_content) { }
 void textMessage::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 	boost::asio::streambuf buffer;
@@ -568,6 +558,8 @@ std::string uuidToString_file(const std::array < uint8_t, ProtocolConstants::CLI
 		ss << std::setw(2) << static_cast<int>(client_id[i]); // Print byte as hex
 	}
 
+	std::dec;
+
 	return ss.str();
 }
 
@@ -586,8 +578,24 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToUUID_file(const s
 		uuid[i] = static_cast<uint8_t>(value); // Convert hex to uint8_t
 	}
 
+	std::dec;
+
 	return uuid;
 }
+
+
+
+// Helper function to remove whitespace from a string
+std::string removeWhitespace(const std::string& input) {
+	std::string output;
+	for (char c : input) {
+		if (!std::isspace(static_cast<unsigned char>(c))) {
+			output.push_back(c);
+		}
+	}
+	return output;
+}
+
 
 
 /* File Utility Functions for "me.info" file*/
@@ -602,7 +610,7 @@ bool CreateClientInfoFile(std::string filename, std::string username, std::array
 
 	file << username << "\n";
 	file << uuidToString_file(client_id) << "\n";
-	file << private_key_base64 << "\n"; // TODO maybe without the "\n"?????????????
+	file << removeWhitespace(private_key_base64); // TODO maybe without the "\n"?????????????
 
 	file.close();
 
@@ -639,22 +647,21 @@ std::string fetchPrivateKeyFromFile() {
 		throw std::runtime_error("Failed to open me.info");
 	} // TODO maybe just return false with an error message? omgggggggg
 
-	std::string name;
-	getline(file, name);
-
-	std::string client_id_str;
-	getline(file, client_id_str);
-
-	// Read the entire remaining content as private key
-	std::string private_key;
 	std::string line;
-	while (std::getline(file, line)) {
-		private_key += line;  // Append each line (removes newlines)
-	}
+	// Read and discard the username line
+	std::getline(file, line);
+	// Read and discard the client ID line
+	std::getline(file, line);
 
+
+	std::ostringstream oss;
+	while (std::getline(file, line)) {
+		oss << line;
+	}
 	file.close();
 
-	return private_key; // Still in base 64.
+	// Remove any incidental whitespace, just in case
+	return removeWhitespace(oss.str());
 }
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
@@ -893,16 +900,10 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 						// Copying the vector which contains an encrypted symmetric key into a string
 						std::string encryptedSymmetricKey(message_content.begin(), message_content.end());
 
-						std::cout << "DEBUG: Encrypted Symmetric Key Size: " << encryptedSymmetricKey.size() << " bytes" << std::endl;
+						// TODO maybe change it to compare to the message content size, and not a defined size...
 						if (encryptedSymmetricKey.size() != ProtocolConstants::ENCRYPTED_SYMMETRIC_KEY_SIZE) {
 							std::cerr << "ERROR: Encrypted key size mismatch! Expected 128, got " << encryptedSymmetricKey.size() << std::endl;
 						}
-
-						std::cout << "Raw Received Encrypted Symmetric Key (Hex): ";
-						for (unsigned char c : encryptedSymmetricKey) {
-							std::cout << std::hex << (int)c << " ";
-						}
-						std::cout << std::endl;
 
 						// Gathering the decoded private key.
 						std::string decoded_priv_key = Base64Wrapper::decode(fetchPrivateKeyFromFile());
@@ -1258,8 +1259,9 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 			// Generating a symmetric key (if there isn't one)
 			if (!(handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) {
-				unsigned char symmetric_key[ProtocolConstants::SYMMETRIC_KEY_SIZE];
-				AESWrapper aes(AESWrapper::GenerateKey(symmetric_key, ProtocolConstants::SYMMETRIC_KEY_SIZE), ProtocolConstants::SYMMETRIC_KEY_SIZE);
+				unsigned char symmetric_key[16] = {};
+				AESWrapper aes(AESWrapper::GenerateKey(symmetric_key, 16), 16);
+				cout << "DEBUG: the size of the char[] is: " << sizeof(symmetric_key) << " and using std:: size it's: " << std::size(symmetric_key) << endl;
 
 				// Encrypting the symmetric key using the destination client's public key
 				if ((handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).has_value()) {
@@ -1267,21 +1269,11 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 					std::string dest_client_public_key = std::string(dest_pub_key_arr.begin(), dest_pub_key_arr.end());
 
 					RSAPublicWrapper rsapub(dest_client_public_key);
-					std::string encrypted_symmetric_key = rsapub.encrypt((const char*)symmetric_key, ProtocolConstants::SYMMETRIC_KEY_SIZE);
-					cout << "DEBUG: symm key is: " << symmetric_key << " and it's size is " << sizeof(symmetric_key) << endl;
-					cout << "DEBUG: encrypted symm key is: " << encrypted_symmetric_key << " and it's size is " << encrypted_symmetric_key.length() << endl;
-
-					std::cout << "DEBUG: Raw Packed Encrypted Symmetric Key (Hex): ";
-					for (unsigned char c : encrypted_symmetric_key) {
-						std::cout << std::hex << (int)c << " ";
-					}
-					std::cout << std::endl;
-
+					std::string encrypted_symmetric_key = rsapub.encrypt((const char*)symmetric_key, sizeof(symmetric_key));
 
 					// Copying the char[] array symmetric key into uint8_t array for easy sending and storage.
 					std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symm_key_arr;
 					std::copy(std::begin(symmetric_key), std::end(symmetric_key), symm_key_arr.begin());
-
 
 					handler.setSymmetricKey(handler.arrayToStringID(dest_client_id), symm_key_arr); // Setting the symmetric key for the target client
 
@@ -1289,10 +1281,10 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 						client_id,
 						ProtocolConstants::CLIENT_VERSION,
 						ProtocolConstants::Request::SEND_MESSAGE,
-						ProtocolConstants::MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE + ProtocolConstants::ENCRYPTED_SYMMETRIC_KEY_SIZE,
+						ProtocolConstants::MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE + encrypted_symmetric_key.size(),
 						dest_client_id,
 						ProtocolConstants::Message::SEND_SYMMETRICAL_KEY,
-						ProtocolConstants::ENCRYPTED_SYMMETRIC_KEY_SIZE,
+						encrypted_symmetric_key.size(),
 						encrypted_symmetric_key
 					);
 

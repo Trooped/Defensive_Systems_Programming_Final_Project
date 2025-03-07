@@ -506,6 +506,7 @@ class Message:
 
     def symmetrical_key_send_message(self):
         """ Handle symmetrical key send messages """
+        # TODO remove this weird check and just check with the message length??
         if len(self.message_content_bytes) != EncryptionKeysSizes.ENCRYPTED_SYMMETRIC_KEY_SIZE.value:
             raise ValueError("Invalid message. Symmetric key send message length must be equal to symmetric key size.")
         offset = 0
@@ -591,6 +592,9 @@ class Request:
             self.offset += RequestOffset.REQUEST_CODE_SIZE.value
             print(f"DEBUG request code: {self.request_code}")
 
+            self.payload_size = struct.unpack("<I", self.request[self.offset:self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value])[0]
+            self.offset += RequestOffset.REQUEST_PAYLOAD_SIZE.value
+
             # TODO add length validation for all "size" fields followed by payload, like in the next example:
             """
             # Skip the filename of `name_len` bytes
@@ -655,12 +659,11 @@ class Request:
 
     def parse_payload(self):
         try:
+            """
             if len(self.request) < self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value:
                 raise ValueError("Request is too short to be valid. No valid payload size field was received.")
+            """
 
-            self.payload_size = \
-                struct.unpack('<I', self.request[self.offset:self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value])[0]
-            self.offset = self.offset + RequestOffset.REQUEST_PAYLOAD_SIZE.value
 
             # Parse the payload according to the different request types
             if (self.request_code == RequestType.CLIENT_LIST_REQUEST.value or
@@ -760,6 +763,8 @@ class ClientManager:
             if request_bytes:
                 self.request = Request(request_bytes)
 
+            print(f"DEBUG: Total Received Bytes ({len(request_bytes)} bytes): {request_bytes.hex()}")
+
             if self.request.request_code == RequestType.REGISTER_REQUEST.value:  # case 600
                 request_bytes += self.socket.recv(
                     RequestFieldsSizes.CLIENT_NAME_SIZE.value + RequestFieldsSizes.PUBLIC_KEY_SIZE.value)
@@ -772,10 +777,10 @@ class ClientManager:
             elif self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value or self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
                 self.request.parse_payload()
             elif self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:  # case 603
-                message_bytes = self.socket.recv(MessageOffset.MIN_MESSAGE_SIZE.value)
-                print("DEBUG: message_bytes: ", message_bytes)
-                if message_bytes:
-                    self.request.message = Message(message_bytes=message_bytes)
+                basic_message_bytes = self.socket.recv(MessageOffset.MIN_MESSAGE_SIZE.value)
+                print("DEBUG: message_bytes: ", basic_message_bytes.hex())  # Print hex representation of message
+                if basic_message_bytes:
+                    self.request.message = Message(message_bytes=basic_message_bytes)
                 else:
                     # TODO send an error response?????
                     print("ERROR ERROR")
@@ -783,6 +788,8 @@ class ClientManager:
 
                 content_bytes = b""
                 remaining_bytes = self.request.message.content_size
+
+                print("DEBUG: message content size= ", self.request.message.content_size)
 
                 while remaining_bytes > 0:
                     chunk = self.socket.recv(remaining_bytes)
@@ -792,8 +799,9 @@ class ClientManager:
                     content_bytes += chunk
                     remaining_bytes -= len(chunk)
 
-                self.request.message.message_content_bytes = content_bytes
+                print(f"DEBUG: Content Bytes ({len(content_bytes)} bytes): {content_bytes.hex()}")
 
+                self.request.message.message_content_bytes = content_bytes
                 self.request.message.parse_message_content()
 
             return True
