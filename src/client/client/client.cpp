@@ -6,8 +6,8 @@
 
 #include "client.hpp"
 
-using namespace std;
 using boost::asio::ip::tcp;
+using namespace std;
 
 //Constructors for Request & Message classes and inheriting classes.
 BaseRequest::BaseRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size)
@@ -29,8 +29,8 @@ void BaseRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& soc
 	boost::asio::write(*socket, buffer);
 }
 
-RegisterRequest::RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key)
-	: BaseRequest(client_id, version, request_code, payload_size), client_name(client_name), public_key(public_key) { }
+RegisterRequest::RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& pub_key)
+	: BaseRequest(client_id, version, request_code, payload_size), client_name(client_name), pub_key(pub_key) { }
 
 void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const {
 
@@ -56,7 +56,7 @@ void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>&
 	const char* char_name = temp_name.c_str();
 	request_stream.write(char_name, ProtocolConstants::CLIENT_NAME_SIZE);
 
-	request_stream.write(reinterpret_cast<const char*>(public_key.data()), public_key.size());
+	request_stream.write(reinterpret_cast<const char*>(pub_key.data()), pub_key.size());
 
 	try {
 		boost::asio::write(*socket, buffer);
@@ -585,7 +585,7 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToUUID_file(const s
 
 
 
-// Helper function to remove whitespace from a string
+// Helper function to remove whitespace from a string TODO delete it
 std::string removeWhitespace(const std::string& input) {
 	std::string output;
 	for (char c : input) {
@@ -610,7 +610,7 @@ bool CreateClientInfoFile(std::string filename, std::string username, std::array
 
 	file << username << "\n";
 	file << uuidToString_file(client_id) << "\n";
-	file << removeWhitespace(private_key_base64); // TODO maybe without the "\n"?????????????
+	file << private_key_base64 << "\n"; // TODO maybe without the "\n"?????????????
 
 	file.close();
 
@@ -655,13 +655,10 @@ std::string fetchPrivateKeyFromFile() {
 
 
 	std::ostringstream oss;
-	while (std::getline(file, line)) {
-		oss << line;
-	}
-	file.close();
+	oss << file.rdbuf();
 
-	// Remove any incidental whitespace, just in case
-	return removeWhitespace(oss.str());
+	file.close();
+	return oss.str();
 }
 
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
@@ -904,12 +901,13 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 						if (encryptedSymmetricKey.size() != ProtocolConstants::ENCRYPTED_SYMMETRIC_KEY_SIZE) {
 							std::cerr << "ERROR: Encrypted key size mismatch! Expected 128, got " << encryptedSymmetricKey.size() << std::endl;
 						}
+						std::cout << "DEBUG: Ciphertext Length: " << encryptedSymmetricKey.size() << " bytes" << std::endl;
 
 						// Gathering the decoded private key.
 						std::string decoded_priv_key = Base64Wrapper::decode(fetchPrivateKeyFromFile());
-						RSAPrivateWrapper rsaDecryptor(decoded_priv_key);
+						std::cout << "DEBUG: Decoded Private Key: \n" << decoded_priv_key << std::endl;
 
-						std::cout << "DEBUG: Using Private Key: " << decoded_priv_key << std::endl;
+						RSAPrivateWrapper rsaDecryptor(decoded_priv_key);
 
 						// Decrypting the symmetric key
 						std::string decryptedSymmetricKey = rsaDecryptor.decrypt(encryptedSymmetricKey);
@@ -1053,8 +1051,14 @@ void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManag
 	// Creating the private and public keys
 	RSAPrivateWrapper rsapriv;
 	std::string pubkey_str = rsapriv.getPublicKey(); // Creating the public key from the private key
-	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey = stringToArrayPubKey(pubkey_str);
+	std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey_arr = stringToArrayPubKey(pubkey_str);
 	std::string priv_base64key = Base64Wrapper::encode(rsapriv.getPrivateKey()); // Converting the public key to base 64
+
+
+	std::string original_private = rsapriv.getPrivateKey();
+	std::cout << "DEBUG: Generated Private Key : \n" << original_private << std::endl;
+	std::cout << "DEBUG: Generated Private Key (Base64): \n" << priv_base64key << std::endl;
+
 
 
 	// Creating the request
@@ -1064,7 +1068,7 @@ void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManag
 		ProtocolConstants::Request::REGISTER_REQUEST,
 		ProtocolConstants::REGISTER_PAYLOAD_SIZE,
 		username,
-		pubkey
+		pubkey_arr
 	);
 
 	auto socket = serverConnection.connectToServer();
@@ -1085,6 +1089,23 @@ void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManag
 	else {
 		throw std::runtime_error("Expected RegisterResponse, but received a different response type.");
 	}
+
+	std::cout << "DEBUG: retrieved Private Key from file (base 64): \n" << fetchPrivateKeyFromFile() << std::endl;
+	std::string decoded_retrieved = Base64Wrapper::decode(fetchPrivateKeyFromFile());
+	std::cout << "DEBUG: retrieved Private Key from file (after decoding): \n" << decoded_retrieved << std::endl;
+
+
+	std::cout << "DEBUG: String 1 Length: " << original_private.size() << std::endl;
+	std::cout << "DEBUG: String 2 Length: " << decoded_retrieved.size() << std::endl;
+
+
+	for (size_t i = 0; i < std::min(original_private.size(), decoded_retrieved.size()); i++) {
+		if (original_private[i] != decoded_retrieved[i]) {
+			printf("Difference at index %zu: 0x%02X vs 0x%02X\n",
+				i, (unsigned char)original_private[i], (unsigned char)decoded_retrieved[i]);
+		}
+	}
+
 
 	cout << "New client details are saved in me.info file." << endl;
 }
@@ -1265,10 +1286,10 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 				// Encrypting the symmetric key using the destination client's public key
 				if ((handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).has_value()) {
-					std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> dest_pub_key_arr = (handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).value();
-					std::string dest_client_public_key = std::string(dest_pub_key_arr.begin(), dest_pub_key_arr.end());
+					std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> dest_pub_key = (handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).value();
+					std::string dest_pub_key_str(dest_pub_key.begin(), dest_pub_key.end());
 
-					RSAPublicWrapper rsapub(dest_client_public_key);
+					RSAPublicWrapper rsapub(dest_pub_key_str);
 					std::string encrypted_symmetric_key = rsapub.encrypt((const char*)symmetric_key, sizeof(symmetric_key));
 
 					// Copying the char[] array symmetric key into uint8_t array for easy sending and storage.

@@ -158,9 +158,9 @@ public:
 class RegisterRequest : public BaseRequest {
 protected:
     std::string client_name;
-    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
+    std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pub_key;
 public:
-    RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key);
+    RegisterRequest(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::string client_name, std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& pub_key);
     void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
