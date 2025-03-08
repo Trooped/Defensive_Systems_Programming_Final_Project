@@ -451,35 +451,33 @@ class Message:
         # self.parse_message()
 
     def parse_basic_message(self):
-        print("DEBUG: basic message bytes = " + str(self.basic_message_bytes))
-        if len(self.basic_message_bytes) < MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value:
-            raise ValueError("Message is too short to be valid. No valid client id field was received.")
+        try:
+            #print("DEBUG: basic message bytes = " + str(self.basic_message_bytes))
+            if len(self.basic_message_bytes) < MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value:
+                raise ValueError("Message is too short to be valid. No valid client id field was received.")
 
-        self.target_client_id = struct.unpack('<16s', self.basic_message_bytes[
-                                                      : MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value])[0]
-        offset = MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value
+            self.target_client_id = struct.unpack('<16s', self.basic_message_bytes[
+                                                          : MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value])[0]
+            offset = MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value
 
-        if len(self.basic_message_bytes) < offset + MessageOffset.MESSAGE_TYPE_SIZE.value:
-            raise ValueError("Message is too short to be valid. No valid message type field was received.")
-        self.message_type = struct.unpack('<B', self.basic_message_bytes[
-                                                offset: offset + MessageOffset.MESSAGE_TYPE_SIZE.value])[0]
-        offset = offset + MessageOffset.MESSAGE_TYPE_SIZE.value
+            if len(self.basic_message_bytes) < offset + MessageOffset.MESSAGE_TYPE_SIZE.value:
+                raise ValueError("Message is too short to be valid. No valid message type field was received.")
+            self.message_type = struct.unpack('<B', self.basic_message_bytes[
+                                                    offset: offset + MessageOffset.MESSAGE_TYPE_SIZE.value])[0]
+            offset = offset + MessageOffset.MESSAGE_TYPE_SIZE.value
 
-        if len(self.basic_message_bytes) < offset + MessageOffset.MESSAGE_CONTENT_SIZE.value:
-            raise ValueError("Message is too short to be valid. No valid content size field was received.")
-        self.content_size = struct.unpack('<I', self.basic_message_bytes[
-                                                offset: offset + MessageOffset.MESSAGE_CONTENT_SIZE.value])[0]
-        offset = offset + MessageOffset.MESSAGE_CONTENT_SIZE.value
+            if len(self.basic_message_bytes) < offset + MessageOffset.MESSAGE_CONTENT_SIZE.value:
+                raise ValueError("Message is too short to be valid. No valid content size field was received.")
+            self.content_size = struct.unpack('<I', self.basic_message_bytes[
+                                                    offset: offset + MessageOffset.MESSAGE_CONTENT_SIZE.value])[0]
+            offset = offset + MessageOffset.MESSAGE_CONTENT_SIZE.value
+        except Exception as e:
+            print(f"Unexpected error while parsing basic message header bytes: {e}")
+
 
     def parse_message_content(self):
         try:
             """CONTENT SIZE AND CONTENT PARSING"""
-            print("DEBUG PRINTS:")
-            print(self.message_content_bytes)
-            print()
-            hex_str = " ".join(f"{byte:02x}" for byte in self.message_content_bytes)
-            print(f"Raw Data ({len(self.message_content_bytes)} bytes): {hex_str}")
-
             if len(self.message_content_bytes) != self.content_size:
                 raise ValueError("Message is too short to be valid. No valid content field was received.")
 
@@ -513,23 +511,20 @@ class Message:
         self.message_content = struct.unpack('<128s', self.message_content_bytes[
                                                      offset: offset + EncryptionKeysSizes.ENCRYPTED_SYMMETRIC_KEY_SIZE.value])[0]
 
-        hex_str = " ".join(f"{byte:02x}" for byte in self.message_content)
-        print(f"Raw Data ({len(self.message_content)} bytes): {hex_str}")
-        print()
-        print(self.message_content)
-
         if len(self.message_content) != self.content_size:
             raise ValueError("Invalid message. Symmetric key send message length must be equal to symmetric key size.")
 
     def text_send_message(self):
-        offset = 0
-        self.message_content = self.content_bytes[offset: offset + self.content_size]
+        self.message_content = self.message_content_bytes[:self.content_size]
+        print(self.message_content)
+        print(len(self.message_content))
 
         # todo same as above, validate length matching and correct type etc...
 
     def file_send_message(self):
+        # TODO change this to be like the above.
         offset = 0
-        self.message_content = self.content_bytes[offset: offset + self.content_size]
+        self.message_content = self.message_content_bytes[offset: offset + self.content_size]
 
 
 class Request:
@@ -961,6 +956,7 @@ class Response:
 
         print("DEBUG-------------------------")
         for client_id, message_id, message_type, content in messages_list:
+            content = content or b""
             print(f"Client ID: {hexify(client_id)}")
             print(f"Message ID: {message_id:08X}")  # Print as 8-digit hex
             print(f"Message Type: {message_type:02X}")  # Print as 2-digit hex
