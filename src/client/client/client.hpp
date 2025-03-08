@@ -434,7 +434,7 @@ public:
 };
 
  
-
+void hexify(const unsigned char* buffer, unsigned int length);
 
 
 #endif // CLIENT.H

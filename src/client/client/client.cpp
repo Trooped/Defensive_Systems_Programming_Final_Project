@@ -57,6 +57,8 @@ void RegisterRequest::sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>&
 	request_stream.write(char_name, ProtocolConstants::CLIENT_NAME_SIZE);
 
 	request_stream.write(reinterpret_cast<const char*>(pub_key.data()), pub_key.size());
+	std::cout << "DEBUG: sending Public Key: \n" << pub_key.data() << "\n and it's size is " << sizeof(pub_key) << " using size of,\n and " << pub_key.size() << " using .size()\n" << std::endl;
+
 
 	try {
 		boost::asio::write(*socket, buffer);
@@ -789,6 +791,8 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			buffer.commit(ProtocolConstants::PUBLIC_KEY_SIZE);
 			std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
 			input_stream.read(reinterpret_cast<char*>(public_key.data()), ProtocolConstants::PUBLIC_KEY_SIZE);
+			std::cout << "DEBUG: public key received from server: \n" << public_key.data() << "\n and it's size is " << sizeof(public_key) << " using size of,\n and " << public_key.size() << " using .size()\n" << std::endl;
+
 
 			ClientHandler& handler = ClientHandler::getInstance();
 			handler.setPublicKey(handler.arrayToStringID(client_id), public_key);
@@ -831,16 +835,13 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			ClientHandler& handler = ClientHandler::getInstance();
 			cout << "Printing the incoming messages: " << endl;
 
-			while (true) {
-				boost::system::error_code ec;
-				size_t message_header_bytes = boost::asio::read(*socket, buffer, boost::asio::transfer_exactly(ProtocolConstants::MESSAGE_HEADER_SIZE), ec);
-				if (ec == boost::asio::error::eof) {
-					std::cout << "Server closed connection, No more messages." << std::endl;
-					break;  // Stop reading, no more data coming
+			while (payload_size > 0) {
+				size_t message_header_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::MESSAGE_HEADER_SIZE));
+				if (message_header_bytes < ProtocolConstants::MESSAGE_HEADER_SIZE) {
+					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for message header field.");
 				}
-				else if (ec) {
-					throw std::runtime_error("Error while reading: " + ec.message());
-				}
+
+				payload_size -= ProtocolConstants::MESSAGE_HEADER_SIZE;
 
 				buffer.commit(ProtocolConstants::MESSAGE_HEADER_SIZE);
 				
@@ -873,17 +874,27 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				}
 				boost::endian::little_to_native_inplace(message_content_size);
 
-				// Read the message content from the communication
-				size_t message_content_bytes = boost::asio::read(*socket, buffer, boost::asio::transfer_exactly(message_content_size));
-				if (message_content_bytes != message_content_size) {
-					throw std::runtime_error("Mismatch between message content size and message content");
-				}
 
+				std::cout << "DEBUG Message Content Size Expected: " << message_content_size << std::endl;
+
+
+				// Read the message content from the communication
+				size_t message_content_bytes = boost::asio::read(*socket, buffer.prepare(message_content_size));
+				if (message_content_bytes < message_content_size) {
+					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for message content");
+				}
 				buffer.commit(message_content_size);
 
 				std::vector<uint8_t> message_content(message_content_size);
 				input_stream.read(reinterpret_cast<char*>(message_content.data()), message_content_size);
 
+				std::cout << "Received Data (Hex): ";
+				for (uint8_t byte : message_content) {
+					printf("%02X ", byte);
+				}
+				std::cout << endl;
+
+				payload_size -= message_content_size;
 
 				// Printing the message
 				std::cout << "From: " << handler.getClient(handler.arrayToStringID(client_id))->client_name << endl;
@@ -901,7 +912,11 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 						if (encryptedSymmetricKey.size() != ProtocolConstants::ENCRYPTED_SYMMETRIC_KEY_SIZE) {
 							std::cerr << "ERROR: Encrypted key size mismatch! Expected 128, got " << encryptedSymmetricKey.size() << std::endl;
 						}
-						std::cout << "DEBUG: Ciphertext Length: " << encryptedSymmetricKey.size() << " bytes" << std::endl;
+
+						std::cout << "DEBUG: encrypted key (Hex) After Receiving: ";
+						hexify(reinterpret_cast<const unsigned char*>(encryptedSymmetricKey.data()), encryptedSymmetricKey.size());
+						std::cout << std::endl;
+						std::cout << "\nIt's size is " << encryptedSymmetricKey.size() << endl;
 
 						// Gathering the decoded private key.
 						std::string decoded_priv_key = Base64Wrapper::decode(fetchPrivateKeyFromFile());
@@ -1004,9 +1019,6 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				}
 				std::cout << "-----<EOM>-----" << endl;
 				std::cout << "\n" << endl;
-
-				// TODO add a check if the payload size is correct here? or it's unneccsarily complicated?????????????????????
-				//return std::make_unique<ErrorResponse>(version, response_code, payload_size); if it is
 			}
 			socket->close();
 			return std::make_unique<WaitingMessagesFetchResponse>(version, response_code, payload_size);
@@ -1058,6 +1070,9 @@ void clientRegister(std::unique_ptr<BaseRequest>& request ,ServerConnectionManag
 	std::string original_private = rsapriv.getPrivateKey();
 	std::cout << "DEBUG: Generated Private Key : \n" << original_private << std::endl;
 	std::cout << "DEBUG: Generated Private Key (Base64): \n" << priv_base64key << std::endl;
+
+	std::cout << "DEBUG: Generated Public Key: \n" << pubkey_str <<"\n and it's size is " << sizeof(pubkey_str) << " using size of,\n and " << pubkey_str.size() <<" using .size()\n" << std::endl;
+	std::cout << "DEBUG: Generated Public Key: \n" << pubkey_arr.data() << "\n and it's size is " << sizeof(pubkey_arr) << " using size of,\n and " << pubkey_arr.size() << " using .size()\n" << std::endl;
 
 
 
@@ -1287,10 +1302,16 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 				// Encrypting the symmetric key using the destination client's public key
 				if ((handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).has_value()) {
 					std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> dest_pub_key = (handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).value();
+					std::cout << "DEBUG: public key fetched from the ClientHandler: \n" << dest_pub_key.data() << "\n and it's size is " << sizeof(dest_pub_key) << " using size of,\n and " << dest_pub_key.size() << " using .size()\n" << std::endl;
 					std::string dest_pub_key_str(dest_pub_key.begin(), dest_pub_key.end());
 
 					RSAPublicWrapper rsapub(dest_pub_key_str);
 					std::string encrypted_symmetric_key = rsapub.encrypt((const char*)symmetric_key, sizeof(symmetric_key));
+
+					std::cout << "DEBUG: encrypted key (Hex) before sending: ";
+					hexify(reinterpret_cast<const unsigned char*>(encrypted_symmetric_key.data()), encrypted_symmetric_key.size());
+					std::cout << std::endl;
+					std::cout << "\nIt's size is " << encrypted_symmetric_key.size() << endl;
 
 					// Copying the char[] array symmetric key into uint8_t array for easy sending and storage.
 					std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symm_key_arr;
@@ -1656,4 +1677,16 @@ std::string AESWrapper::decrypt(const char* cipher, unsigned int length)
 	stfDecryptor.MessageEnd();
 
 	return decrypted;
+}
+
+// TODO delete it maybbe???????????
+void hexify(const unsigned char* buffer, unsigned int length)
+{
+	std::ios::fmtflags f(std::cout.flags());
+	std::cout << std::hex;
+	for (size_t i = 0; i < length; i++)
+		std::cout << std::setfill('0') << std::setw(2) << (0xFF & buffer[i]) << (((i + 1) % 16 == 0) ? "\n" : " ");
+	std::cout << std::endl;
+	std::cout.flags(f);
+	std::dec;
 }

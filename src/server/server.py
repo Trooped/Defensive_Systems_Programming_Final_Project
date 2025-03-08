@@ -857,6 +857,8 @@ class ClientManager:
         # TODO continue with the logic of registering a new user, and check for a current user already...
         response = Response(self.socket)
 
+        print(f"DEBUG: The public key i received is:\n {self.request.public_key} \n and it's size is: {len(self.request.public_key)}")
+
         if not self.db.does_client_exist(self.username):
             server_client_id = self.db.insert_client(self.request.client_name, self.request.public_key)
             response.register_response(server_client_id)
@@ -867,6 +869,7 @@ class ClientManager:
     def public_key_other_client_request(self):
         response = Response(self.socket)
         public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
+        print(f"DEBUG: The public key i'm sending is:\n {public_key_other_client} \n and it's size is: {len(public_key_other_client)}")
         response.public_key_response(self.request.target_client_id, public_key_other_client)
 
     def send_message_request(self):
@@ -926,6 +929,8 @@ class Response:
 
         self.client_id = struct.pack("<16s", target_client_id)
         self.public_key = struct.pack("<160s", public_key)
+        print(f"DEBUG: The public key i'm sending after packing is:\n {self.public_key} \n and it's size is: {len(self.public_key)}")
+
         self.socket.sendall(self.client_id + self.public_key)
 
     def message_sent_response(self, target_client_id, message_id):
@@ -948,6 +953,22 @@ class Response:
                                  ResponseFieldsSizes.MESSAGE_TYPE_SIZE.value + \
                                  ResponseFieldsSizes.MESSAGE_CONTENT_SIZE.value + len(content)
 
+
+        # TODO DEBUG, REMOvE THIS LATER!!!!!!
+        def hexify(data):
+            """Convert bytes to a hex string for debugging."""
+            return " ".join(f"{b:02X}" for b in data)
+
+        print("DEBUG-------------------------")
+        for client_id, message_id, message_type, content in messages_list:
+            print(f"Client ID: {hexify(client_id)}")
+            print(f"Message ID: {message_id:08X}")  # Print as 8-digit hex
+            print(f"Message Type: {message_type:02X}")  # Print as 2-digit hex
+            print(f"Content size: {len(content)}")  # Print as 2-digit hex
+            print(f"Content\n: {hexify(content)}")
+            print("-" * 40)
+        print("END DEBUG-------------------------")
+
         # Sending the response header
         self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
         self.socket.sendall(self.response)
@@ -961,14 +982,20 @@ class Response:
             content = content or b""
             fmt_message_content_size = struct.pack("<I", len(content))
 
+            header = fmt_id + fmt_message_id + fmt_message_type + fmt_message_content_size
+
+            print("DEBUG Header Sent (Hex):", header.hex())
+
             # Sending the message header
-            self.socket.sendall(fmt_id + fmt_message_id + fmt_message_type + fmt_message_content_size)
+            self.socket.sendall(header)
+
 
             # Sending the message content
             if content is not None:
                 for i in range(0, len(content), self.CHUNK_SIZE):
                     chunk = content[i:i + self.CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
                     self.socket.sendall(chunk)  # Send the chunk
+                    print("DEBUG: Sending chunk ", chunk.hex())
 
     def error_response(self):
         self.response_code = ResponseType.GENERAL_ERROR.value
