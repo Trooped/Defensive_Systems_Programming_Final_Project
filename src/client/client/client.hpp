@@ -1,5 +1,5 @@
 /**
-@File: client.h
+@File: client.hpp
 @Author: Omri Peretz
 @Date: March 2025
 @Assignment: Maman 15
@@ -8,6 +8,16 @@
 @Description:
 This file is a client program (.h file) written in C++, that communicates with a server program. Used for a message transfer protocol between different clients.
 The client and server communicate over TCP, with a compatible, agreed upon protocol. The data is being sent in little endian format.
+The text & files being sent are encrypted and decrypted using a 16 byte symmetric key (AES - CBC). The symmetric key is encrypted and sent using RSA.
+The symmetric key transferred between clients in the following mechanism:
+0. Client A and Client B register to the server, and create a private and public key.
+1. Client A send a request for the public key of client B
+2. Client A send client B a request for a symmetric key
+3. Client B receives the request
+4. Client B sends a request for the public key of client A
+5. Client B Creates a symmetric key, encrypts it using client A's public key, and requests to send it to client A
+6. Client A receives the symmetric key, decrypts it using his private key
+7. Client A and Client B can communicate freely, with encrypted texts and files using their shared symmetric key
 
 The client can send the following requests to the server (number in parantheses is the input code the client needs to enter):
 - 600: Registration request (110)
@@ -28,7 +38,6 @@ The server will do the operation and respond with the following status codes:
 - 2104: Success: List of waiting messages sent to client
 - 9000: Error: General server error
 */
-
 
 #ifndef CLIENT_H
 #define CLIENT_H
@@ -109,7 +118,6 @@ namespace ProtocolConstants {
     constexpr size_t PUBLIC_KEY_SIZE = 160;
     constexpr size_t PRIVATE_KEY_SIZE = 128;
     constexpr size_t SYMMETRIC_KEY_SIZE = 16;
-    constexpr size_t ENCRYPTED_SYMMETRIC_KEY_SIZE = 128; // TODO maybe it's useless here???
 
     // General Field Sizes
     constexpr size_t CLIENT_ID_SIZE = 16;           // Size of user ID field (16 bytes)
@@ -141,6 +149,8 @@ namespace ProtocolConstants {
     constexpr size_t MAX_PORT_LENGTH = 5;
     constexpr size_t MIN_PORT_VALUE = 0;
     constexpr size_t MAX_PORT_VALUE = 65535;
+    const std::string SERVER_FILENAME = "server.info";
+    const std::string CLIENT_FILENAME = "me.info";
 
 }; // namespace ProtocolConstants
 
@@ -326,21 +336,21 @@ public:
     void addClient(const std::string& client_id,
         const std::string& client_name);
 
-    // Set Public Key
+    // Sets the Public Key of a specific client.
     bool setPublicKey(const std::string& client_id,
         const std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>& public_key);
 
-    // Set Symmetric Key
+    // Sets the Symmetric Key of a specific client.
     bool setSymmetricKey(const std::string& client_id,
         const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key);
 
-    // Get Client id by his name
+    // Get Client id by the client name
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientIDByName(const std::string& name);
 
-    // Get number of clients that are saved right now on memory. TODO maybe it's useless??
+    // Get number of clients that are saved right now on memory.
     int numOfClients() const;
 
-    // Get Client (Returns std::optional)
+    // Get Client (Returns std::optional of ClientInfo struct)
     std::optional<ClientInfo> getClient(const std::string& client_id) const;
 
     // Helper functions to convert the client id array to string and vice versa
@@ -380,10 +390,83 @@ public:
     std::string getPort() const { return port; }
 };
 
+//************************************************
+/* Text Validation and Manipulation Functions*/
+//************************************************
 
-/*
-*	Wrapper Function and Classes Provided externally, for use with the project's demands.
-*/
+// Converts public key string to array.
+std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArrayPubKey(const std::string& str);
+
+// Validates that a string contains ONLY ascii characters.
+bool containsOnlyASCII(const std::string& name);
+
+// Validates a client name.
+bool isValidClientName(const std::string& client_name);
+
+// Converts a 16 byte client id to ASCII representation, where every 2 characters represent an hex value with 8 bits.
+std::string uuidToString_file(const std::array < uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id);
+
+// Converts a size 32 characters client id string, where each 2 characters are a 8-bit hex value to a 16 byte client id array of uint8_t
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToUUID_file(const std::string& client_id_string);
+
+//************************************************
+/* File Utility Functions for "me.info" file*/
+//************************************************
+
+// Creates a client.info file, and inserts the correct information according to the protocol standards.
+bool CreateClientInfoFile(std::string filename, std::string username, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::string private_key_base64);
+
+// Reads the me.info file and returns the client id from the file.
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> fetchClientIdFromFile();
+
+// Reads the me.info file and returns the private key from the file (still in base 64)
+std::string fetchPrivateKeyFromFile();
+
+//********************************************
+/* Utility Functions*/
+//********************************************
+
+// Asks the user for a client username, and return the client's ID.
+std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID();
+
+// Utility function that reads a fixed amount of bytes from the socket, validates that it read the correct amount of bytes, and then returns it as a vector.
+std::vector<uint8_t> readFixedSize(boost::asio::ip::tcp::socket& socket, size_t size);
+
+// "Flushes" the buffer given to it as a parameter (consumes and clears it basically)
+void flushBuffer(boost::asio::streambuf& buffer, std::istream& stream);
+
+// Checks if a file exists using the filename
+bool doesFileExist(const std::string& filename);
+
+//********************************************
+/* Main Client Logic Functions*/
+//********************************************
+
+// Parses the response coming back from the server according to the protocol, using the readFixedSize function.
+std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket);
+
+// Handles the logic to register a client to the server
+void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr<BaseResponse>& response, ServerConnectionManager& serverConnection);
+
+// Handles the logic to make a clients list request
+void handleClientsListAndFetchMessagesRequest(int operation_code, std::unique_ptr<BaseRequest>& request, std::unique_ptr<BaseResponse>& response, ServerConnectionManager& serverConnection);
+
+// Handles the public key request
+void handlePublicKeyRequest(std::unique_ptr<BaseRequest>& request, std::unique_ptr<BaseResponse>& response, ServerConnectionManager& serverConnection);
+
+// Handles the 4 types of message types sending and response.
+void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request, std::unique_ptr<BaseResponse>& response, ServerConnectionManager& serverConnection);
+
+// Handles the user input, by calling the handle request function (respective to the relevant request)
+void handleUserInput(int operation_code, ServerConnectionManager& serverConnection);
+
+/* Main Function - main loop*/
+int main();
+
+
+//******************************************************************************************
+//*	Wrapper Function and Classes Provided externally, for use with the project's demands.
+//******************************************************************************************
 
 // RSA Wrappers
 class RSAPublicWrapper
