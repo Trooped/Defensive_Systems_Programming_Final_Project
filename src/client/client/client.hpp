@@ -9,23 +9,23 @@
 This file is a client program (.h file) written in C++, that communicates with a server program. Used for a message transfer protocol between different clients.
 The client and server communicate over TCP, with a compatible, agreed upon protocol. The data is being sent in little endian format.
 
-The client can send the following requests to the server:
-- 600: Registration request
-- 601: Client list request
-- 602: Public key of other client request
-- 603: Send message request
-- 603 - 1: Symmetrical key from other client request
-- 603 - 2: Symmetrical key to other client request
-- 603 - 3: Text message send request 
-- 603 - 4: File send request
-- 604: Incoming messages addressed to the client request
+The client can send the following requests to the server (number in parantheses is the input code the client needs to enter):
+- 600: Registration request (110)
+- 601: Client list request (120)
+- 602: Public key of other client request (130)
+- 603: Send message request (no specific input)
+- 603 - 1: Receive symmetric key from other client request (151)
+- 603 - 2: Send symmetric key to other client request (152)
+- 603 - 3: Text message send request (150)
+- 603 - 4: File send request (153)
+- 604: waiting messages addressed to the client request (140)
 
-The server will do the operation and respond with the following statuses:
+The server will do the operation and respond with the following status codes:
 - 2100: Success: Registration suceeded
 - 2101: Success: List of clients sent
-- 2102: Success: Public key sent
+- 2102: Success: Public key of other client sent to requesting client
 - 2103: Success: Message sent to client (held at server database until client requests to read it)
-- 2104: Success: List of incoming messages sent
+- 2104: Success: List of waiting messages sent to client
 - 9000: Error: General server error
 */
 
@@ -61,9 +61,7 @@ using boost::asio::ip::tcp;
 namespace ProtocolConstants {
 
     // General Protocol Details
-    constexpr uint8_t CLIENT_VERSION = 2;      // Current protocol version
-    //constexpr uint16_t MAX_FILENAME_LENGTH = 255; // Maximum allowed filename length
-
+    constexpr uint8_t CLIENT_VERSION = 2;      // Current protocol version, version 2 because there's file sending implementation
 
     // Client Request codes (for the user input in the console)
     enum Input_Codes : uint8_t {
@@ -88,7 +86,7 @@ namespace ProtocolConstants {
         FETCH_WAITING_MESSAGES_REQUEST = 604
     };
 
-    // Message Codes
+    // Message Codes (for both sending and receiving)
     enum Message : uint8_t {
         REQUEST_SYMMETRICAL_KEY = 1,
         SEND_SYMMETRICAL_KEY = 2,
@@ -108,41 +106,50 @@ namespace ProtocolConstants {
 
 
     // Encryption Keys Sizes:
-    //ADDDDDDDDDDDDDDDDDDDDDDDDD THE KEYS SIZES!!!!!!!!!!!!
     constexpr size_t PUBLIC_KEY_SIZE = 160;
     constexpr size_t PRIVATE_KEY_SIZE = 128;
     constexpr size_t SYMMETRIC_KEY_SIZE = 16;
-    constexpr size_t ENCRYPTED_SYMMETRIC_KEY_SIZE = 128;
+    constexpr size_t ENCRYPTED_SYMMETRIC_KEY_SIZE = 128; // TODO maybe it's useless here???
 
-    // General Request Sizes
+    // General Field Sizes
     constexpr size_t CLIENT_ID_SIZE = 16;           // Size of user ID field (16 bytes)
     constexpr size_t VERSION_SIZE = 1;           // Size of version field (1 byte)
     constexpr size_t REQUEST_CODE_SIZE = 2;                // Size of operation code field (2 byte)
+    constexpr size_t RESPONSE_CODE_SIZE = 2;      // Size of Response code size
     constexpr size_t PAYLOAD_FIELD_SIZE = 4;     // Size of payload field size (4 bytes) - containing the size of the following payload
     constexpr size_t CLIENT_NAME_SIZE = 255;    // Size of client name field (255 ASCII string with \n)
 
-    // Message Send Request Sizes
+    // Message Field Sizes
     constexpr size_t MESSAGE_TYPE_SIZE = 1;    // Size of Message type field size
     constexpr size_t MESSAGE_CONTENT_FIELD_SIZE = 4;    // Size of message content field (describing the size of the following message content)
-    constexpr size_t MESSAGE_ID_SIZE = 4;
-    constexpr size_t MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE = 0;
-    constexpr size_t MAXIMUM_TEXT_AND_FILE_SIZE = UINT32_MAX;
+    constexpr size_t MESSAGE_ID_SIZE = 4;           // Size of Response message ID field size
+    constexpr size_t MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE = 0;  // Size of message request for symmetrical key content field size
+    constexpr size_t MESSAGE_REQUEST_HEADER_SIZE = CLIENT_ID_SIZE + MESSAGE_TYPE_SIZE + MESSAGE_CONTENT_FIELD_SIZE; // This is the BASIC message header payload size, not including content.
+    constexpr size_t MAXIMUM_TEXT_AND_FILE_SIZE = UINT32_MAX - MESSAGE_REQUEST_HEADER_SIZE; // Max size of the message content size (either text or file).
 
     // Request Payload Sizes
-    constexpr size_t REGISTER_PAYLOAD_SIZE = CLIENT_NAME_SIZE + PUBLIC_KEY_SIZE;
-    constexpr size_t CLIENT_LIST_AND_FETCH_MESSAGES_PAYLOAD_SIZE = 0; 
-    constexpr size_t PUBLIC_KEY_FETCH_PAYLOAD_SIZE = CLIENT_ID_SIZE;
-    constexpr size_t MESSAGE_REQUEST_BASIC_PAYLOAD_SIZE = CLIENT_ID_SIZE + MESSAGE_TYPE_SIZE + MESSAGE_CONTENT_FIELD_SIZE; // This is the BASIC message payload size, the content will increase it 
+    constexpr size_t REGISTER_PAYLOAD_SIZE = CLIENT_NAME_SIZE + PUBLIC_KEY_SIZE; // Size of payload for register request operation
+    constexpr size_t CLIENT_LIST_AND_FETCH_MESSAGES_PAYLOAD_SIZE = 0; // Size of payload for client list request operation
+    constexpr size_t PUBLIC_KEY_FETCH_PAYLOAD_SIZE = CLIENT_ID_SIZE; // Size of payload for public key request operation
+    constexpr size_t MAXIMUM_PAYLOAD_SIZE = UINT32_MAX; // Max size of request payload
 
     // Response Sizes
-    constexpr size_t RESPONSE_CODE_SIZE = 2;
-    constexpr size_t BASIC_RESPONSE_SIZE = VERSION_SIZE + RESPONSE_CODE_SIZE + PAYLOAD_FIELD_SIZE;
-    constexpr size_t MESSAGE_HEADER_SIZE = CLIENT_ID_SIZE + MESSAGE_ID_SIZE + MESSAGE_TYPE_SIZE + MESSAGE_CONTENT_FIELD_SIZE;
+    constexpr size_t RESPONSE_HEADER_SIZE = VERSION_SIZE + RESPONSE_CODE_SIZE + PAYLOAD_FIELD_SIZE; // Size of general response header size
+    constexpr size_t MESSAGE_RESPONSE_HEADER_SIZE = CLIENT_ID_SIZE + MESSAGE_ID_SIZE + MESSAGE_TYPE_SIZE + MESSAGE_CONTENT_FIELD_SIZE; // Size of message response header size
+
+    // Other Constants
+    constexpr size_t MAX_PORT_LENGTH = 5;
+    constexpr size_t MIN_PORT_VALUE = 0;
+    constexpr size_t MAX_PORT_VALUE = 65535;
+
+}; // namespace ProtocolConstants
 
 
-}; // namespace Protocol
-
-// Class declarations for the Request & Message classes
+/* Class declarations for the Request & Message classes
+* All classes inherit from, and are based on the BaseRequest class.
+* Each class contains a constructor and a SendRequest function (which uses virtual function and class logic to send a request over Boost socket to the server,
+* and chooses the correct request function with the correct details - according to the protocol).
+*/
 class BaseRequest {
 protected:
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
@@ -155,6 +162,7 @@ public:
     virtual void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const;
 };
 
+// Extra client name and public key attributes
 class RegisterRequest : public BaseRequest {
 protected:
     std::string client_name;
@@ -171,6 +179,7 @@ public:
     void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
+// Extra client id attribute
 class PublicKeyRequest : public BaseRequest {
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id;
 public:
@@ -178,7 +187,7 @@ public:
     void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
-
+// Message inheriting class - Extra client id, message type and message content size attributes.
 class Message : public BaseRequest{
 protected:
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id;
@@ -189,15 +198,14 @@ public:
     void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
-
+// No extra attribute
 class symmetricKeyRequestMessage : public Message {
-
 public:
     symmetricKeyRequestMessage(std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint8_t version, uint16_t request_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> target_client_id, uint8_t message_type, uint32_t message_content_size);
     void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
-
 };
 
+// Extra symmetric key attribute (encrypted using RSA public key of target client)
 class symmetricKeySendMessage : public Message {
 protected:
     std::string encrypted_symmetric_key;
@@ -206,6 +214,7 @@ public:
     void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
+// Extra message content attribute (encrypted using AES symmetric key with target client)
 class textMessage : public Message {
     std::vector<uint8_t> message_content;
 public:
@@ -213,6 +222,7 @@ public:
     void sendRequest(std::shared_ptr<boost::asio::ip::tcp::socket>& socket) const override;
 };
 
+// Extra file content attribute (encrypted using AES symmetric key with target client)
 class FileSendMessage : public Message {
     std::vector<uint8_t> file_content;
 public:
@@ -221,8 +231,11 @@ public:
 };
 
 
-// Class declarations for the Response classes - coming from the server
-
+/* Class declarations for the Response classes
+* All classes inherit from, and are based on the BaseResponse class.
+* Each class contains a constructor and a SendRequest function (which uses virtual function and class logic to send a request over Boost socket to the server,
+* and chooses the correct request function with the correct details - according to the protocol).
+*/
 class BaseResponse {
 protected:
     uint8_t version;
@@ -233,6 +246,7 @@ public:
     virtual ~BaseResponse() = default;
 };
 
+// Extra client id attribute.
 class RegisterResponse : public BaseResponse {
 protected:
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
@@ -241,11 +255,13 @@ public:
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientID();
 };
 
+// No extra attributes.
 class ClientsListResponse : public BaseResponse {
 public:
     ClientsListResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
+// Extra client id and public key attributes.
 class PublicKeyResponse : public BaseResponse {
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
     std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> pubkey;
@@ -254,6 +270,7 @@ public:
 
 };
 
+// Extra client id attribute
 class MessageSentResponse : public BaseResponse {
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
     uint32_t message_id;
@@ -261,17 +278,21 @@ public:
     MessageSentResponse(uint8_t version, uint16_t response_code, uint32_t payload_size, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, uint32_t message_id);
 };
 
-
+// No extra attributes.
 class WaitingMessagesFetchResponse : public BaseResponse {
 public:
     WaitingMessagesFetchResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
+// No extra attributes.
 class ErrorResponse : public BaseResponse {
 public:
     ErrorResponse(uint8_t version, uint16_t response_code, uint32_t payload_size);
 };
 
+/* ClientInfo struct-
+* Used as a "recipe" contain the other relevant fields on another client. His username, public key, and shared symmetric key.
+*/
 struct ClientInfo {
     std::string client_name;
     std::optional<std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>> public_key;  // Optional field
@@ -282,6 +303,10 @@ struct ClientInfo {
     ClientInfo(const std::string& name) : client_name(name) {}
 };
 
+/* ClientHandler class-
+* Used as a Singleton class (meaning one instance that is initiated in runtime and used throughout the code, and accessed from anywhere.
+* Contains a map of (client id : ClientInfo struct), to change/access other clients info throughout runtime. Saved on memory only.
+*/
 class ClientHandler {
     std::unordered_map<std::string, ClientInfo> clients;
     // Private constructor for single instance
@@ -309,37 +334,48 @@ public:
     bool setSymmetricKey(const std::string& client_id,
         const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key);
 
+    // Get Client id by his name
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientIDByName(const std::string& name);
 
+    // Get number of clients that are saved right now on memory. TODO maybe it's useless??
     int numOfClients() const;
 
     // Get Client (Returns std::optional)
     std::optional<ClientInfo> getClient(const std::string& client_id) const;
 
+    // Helper functions to convert the client id array to string and vice versa
     std::string arrayToStringID(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& arr);
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToArrayID(const std::string& str);
 
-    // Print All Clients (Debugging)
+    // Print All Clients (Debugging) TODO delete it!!!!!!!!!!!!!!!!!!!!!!
     void printClients() const;
 };
 
+/* ServerConnectionManager class- 
+* Used to gather the required information, validate it, and access it in order to initiate a connection to the server.
+*/
 class ServerConnectionManager {
     std::string ip;
     std::string port;
     boost::asio::io_context io_context;
     std::shared_ptr<boost::asio::ip::tcp::socket> socket;
-
 public:
-    ServerConnectionManager(); // Constructor reads IP & Port
+    ServerConnectionManager(); // Constructor, which validates and then reads IP & Port from "server.info" file
 
+    // Checks if the port and ip gathered from the file are valid
     bool isPortValid(const std::string& tmp_port);
     bool isIPvalid(const std::string& tmp_ip);
-    void clearFileAndResetPointer(std::ifstream& file);
-    std::string readIPfromFile(const std::string& line);
-    std::string readPortfromFile(const std::string& line);
+    
+    // Validate the server.info file
     std::string validate_server_file(std::ifstream& file);
 
+    // Reads the IP and Port from the file AFTER validaing it.
+    std::string readIPfromFile(const std::string& line);
+    std::string readPortfromFile(const std::string& line);
+    
+    // Connects to the server and returns a smart pointer to the socket.
     std::shared_ptr<boost::asio::ip::tcp::socket> connectToServer(); // Connect on demand
+
     std::string getIP() const { return ip; }
     std::string getPort() const { return port; }
 };
