@@ -542,8 +542,7 @@ std::string uuidToString_file(const std::array < uint8_t, ProtocolConstants::CLI
 	for (size_t i = 0; i < client_id.size(); ++i) {
 		ss << std::setw(2) << static_cast<int>(client_id[i]); // Print byte as hex
 	}
-
-	std::dec;
+	std::cout << std::dec;
 	return ss.str();
 }
 
@@ -562,9 +561,7 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToUUID_file(const s
 		ss >> value;
 		uuid[i] = static_cast<uint8_t>(value); // Convert hex to uint8_t
 	}
-
-	std::dec;
-
+	std::cout << std::dec;
 	return uuid;
 }
 
@@ -651,39 +648,45 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClient
 
 /* Main Client Logic Functions*/
 
+
+std::vector<uint8_t> readFixedSize(boost::asio::ip::tcp::socket& socket, size_t size) {
+	boost::asio::streambuf buffer;
+	size_t bytes_read = boost::asio::read(socket, buffer.prepare(size));
+
+	if (bytes_read < size) {
+		throw std::runtime_error("Received data is too short. Expected " + std::to_string(size) + " bytes, got " + std::to_string(bytes_read));
+	}
+
+	buffer.commit(size);
+	std::vector<uint8_t> data(size);
+	std::istream input_stream(&buffer);
+	input_stream.read(reinterpret_cast<char*>(data.data()), size);
+
+	return data;
+}
+
+
+
 // Parses the response coming back from the server.
 std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket) {
 	boost::asio::streambuf buffer; // Declare a buffer for the incoming socket bytes, for easy parsing.
 	std::istream input_stream(&buffer); // Linked to the buffer, used for easy gathering of the required data
 	ClientHandler& handler = ClientHandler::getInstance(); // Access the singleton global ClientHandler instance, for use in the entire parsing logic.
 	try {
-		// Read the basic request (user_id, version and operation number).
-		size_t basic_response_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::RESPONSE_HEADER_SIZE));
-		if (basic_response_bytes < ProtocolConstants::RESPONSE_HEADER_SIZE) {
-			throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for version, response code and payload_size fields.");
-		}
-		buffer.commit(ProtocolConstants::RESPONSE_HEADER_SIZE);
+		// Read the full response header at once
+		std::vector<uint8_t> header_data = readFixedSize(*socket, ProtocolConstants::RESPONSE_HEADER_SIZE);
 
 		uint8_t version;
 		uint16_t response_code;
-		uint32_t payload_size = 0;
+		uint32_t payload_size;
 
-		input_stream.read(reinterpret_cast<char*>(&version), ProtocolConstants::VERSION_SIZE);
-		if (input_stream.fail()) {
-			throw std::runtime_error("Failed to read version from the buffer.");
-		}
-		//validateField("user_id", user_id, Protocol::USER_ID_SIZE); TODO implement it here as well??
+		// Extract fields from the header_data
+		std::memcpy(&version, header_data.data(), ProtocolConstants::VERSION_SIZE);
+		std::memcpy(&response_code, header_data.data() + ProtocolConstants::VERSION_SIZE, ProtocolConstants::RESPONSE_CODE_SIZE);
+		std::memcpy(&payload_size, header_data.data() + ProtocolConstants::VERSION_SIZE + ProtocolConstants::RESPONSE_CODE_SIZE, ProtocolConstants::PAYLOAD_FIELD_SIZE);
 
-		input_stream.read(reinterpret_cast<char*>(&response_code), ProtocolConstants::RESPONSE_CODE_SIZE);
-		if (input_stream.fail()) {
-			throw std::runtime_error("Failed to read response code from the buffer.");
-		}
+		// Convert to native endian format if needed
 		boost::endian::little_to_native_inplace(response_code);
-
-		input_stream.read(reinterpret_cast<char*>(&payload_size), ProtocolConstants::PAYLOAD_FIELD_SIZE);
-		if (input_stream.fail()) {
-			throw std::runtime_error("Failed to read response code from the buffer.");
-		}
 		boost::endian::little_to_native_inplace(payload_size);
 
 		if (response_code == ProtocolConstants::Response::REGISTRATION_SUCCESS) {
@@ -691,14 +694,11 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				throw std::runtime_error("Payload size has different value than what's expected in register response");
 			}
 
-			size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
-			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
-				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
-			}
-			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+			std::vector<uint8_t> client_id_vec = readFixedSize(*socket, ProtocolConstants::CLIENT_ID_SIZE);
 
+			// Convert vector to array
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-			input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
+			std::copy_n(client_id_vec.begin(), ProtocolConstants::CLIENT_ID_SIZE, client_id.begin());
 
 			socket->close();
 			cout << "Register operation is successful.\n";
@@ -712,24 +712,17 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
 
 				for (size_t i = 0; i < num_of_clients; i++) {
-					size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
-					if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
-						throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
-					}
-					buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+					// Read client ID and convert vector -> array
+					std::vector<uint8_t> client_id_vec = readFixedSize(*socket, ProtocolConstants::CLIENT_ID_SIZE);
 					std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-					input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
+					std::copy_n(client_id_vec.begin(), ProtocolConstants::CLIENT_ID_SIZE, client_id.begin());
 
-					size_t name_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_NAME_SIZE));
-					if (name_bytes < ProtocolConstants::CLIENT_NAME_SIZE) {
-						throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client name");
-					}
-					buffer.commit(ProtocolConstants::CLIENT_NAME_SIZE);
-					std::array<uint8_t, ProtocolConstants::CLIENT_NAME_SIZE> client_name_arr;
-					input_stream.read(reinterpret_cast<char*>(client_name_arr.data()), ProtocolConstants::CLIENT_NAME_SIZE);
+					// Read client name and convert vector -> string
+					std::vector<uint8_t> client_name_vec = readFixedSize(*socket, ProtocolConstants::CLIENT_NAME_SIZE);
+					std::string client_name(client_name_vec.begin(), client_name_vec.end());
 
-					std::string client_name(client_name_arr.begin(), client_name_arr.end()); // Copy the array from uint8_t form to char array (to string).
-					client_name.erase(std::find(client_name.begin(), client_name.end(), '\0'), client_name.end()); // Trim trailing nulls
+					// Trim null terminators (if any)
+					client_name.erase(std::find(client_name.begin(), client_name.end(), '\0'), client_name.end());
 
 					handler.addClient(handler.arrayToStringID(client_id), client_name);
 					cout << i + 1 << ". " << client_name << endl;
@@ -746,25 +739,17 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::PUBLIC_KEY_SIZE) {
 				throw std::runtime_error("Payload size has different value than what's expected in public key response");
 			}
-
-			size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
-			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
-				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
-			}
-			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+			// Read client id and convert vec -> array
+			std::vector<uint8_t> client_id_vec = readFixedSize(*socket, ProtocolConstants::CLIENT_ID_SIZE);
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-			input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
+			std::copy_n(client_id_vec.begin(), ProtocolConstants::CLIENT_ID_SIZE, client_id.begin());
 
-			size_t public_key_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::PUBLIC_KEY_SIZE));
-			if (public_key_bytes < ProtocolConstants::PUBLIC_KEY_SIZE) {
-				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for public key");
-			}
-			buffer.commit(ProtocolConstants::PUBLIC_KEY_SIZE);
+			// Read public key and convert vec -> array
+			std::vector<uint8_t> pubkey_vec = readFixedSize(*socket, ProtocolConstants::PUBLIC_KEY_SIZE);
 			std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> public_key;
-			input_stream.read(reinterpret_cast<char*>(public_key.data()), ProtocolConstants::PUBLIC_KEY_SIZE);
+			std::copy_n(pubkey_vec.begin(), ProtocolConstants::PUBLIC_KEY_SIZE, public_key.begin());
 
 			handler.setPublicKey(handler.arrayToStringID(client_id), public_key);
-
 			socket->close();
 			cout << "Public key of client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\" was fetched from the server and saved.\n";
 			return std::make_unique<PublicKeyResponse>(version, response_code, payload_size, client_id, public_key);
@@ -773,26 +758,19 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::MESSAGE_ID_SIZE) {
 				throw std::runtime_error("Payload size has different value than what's expected in message sent response");
 			}
-
-			size_t id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::CLIENT_ID_SIZE));
-			if (id_bytes < ProtocolConstants::CLIENT_ID_SIZE) {
-				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for client id");
-			}
-			buffer.commit(ProtocolConstants::CLIENT_ID_SIZE);
+			// Read client id and convert vec -> array
+			std::vector<uint8_t> client_id_vec = readFixedSize(*socket, ProtocolConstants::CLIENT_ID_SIZE);
 			std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id;
-			input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
+			std::copy_n(client_id_vec.begin(), ProtocolConstants::CLIENT_ID_SIZE, client_id.begin());
 
-			size_t message_id_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::MESSAGE_ID_SIZE));
-			if (message_id_bytes < ProtocolConstants::MESSAGE_ID_SIZE) {
-				throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for message_id");
-			}
-			buffer.commit(ProtocolConstants::MESSAGE_ID_SIZE);
+			// Read message id and convert vec -> uint32_t
+			std::vector<uint8_t> message_id_vec = readFixedSize(*socket, ProtocolConstants::MESSAGE_ID_SIZE);
 			uint32_t message_id;
-			input_stream.read(reinterpret_cast<char*>(&message_id), ProtocolConstants::MESSAGE_ID_SIZE);
+			std::memcpy(&message_id, message_id_vec.data(), ProtocolConstants::MESSAGE_ID_SIZE);
 
 			boost::endian::little_to_native_inplace(message_id);
 
-			socket->close();
+			socket->close(); // TODO add message id.
 			cout << "Message sent to client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\".\n";
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
 		}
@@ -800,11 +778,8 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			cout << "Printing the incoming messages: " << endl;
 
 			while (payload_size > 0) {
-				size_t message_header_bytes = boost::asio::read(*socket, buffer.prepare(ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE));
-				if (message_header_bytes < ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE) {
-					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for message header field.");
-				}
-				buffer.commit(ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE);
+				// Read the fixed-size message header
+				std::vector<uint8_t> header_data = readFixedSize(*socket, ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE);
 
 				payload_size -= ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE;
 				
@@ -813,45 +788,23 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				uint8_t message_type;
 				uint32_t message_content_size;
 
-				input_stream.read(reinterpret_cast<char*>(client_id.data()), ProtocolConstants::CLIENT_ID_SIZE);
-				if (input_stream.fail()) {
-					throw std::runtime_error("Failed to read sending client_id from the buffer.");
-				}
-				//validateField("user_id", user_id, Protocol::USER_ID_SIZE); // TODO delete it or make this version in this maman!!!
+				std::memcpy(client_id.data(), header_data.data(), ProtocolConstants::CLIENT_ID_SIZE);
+				std::memcpy(&message_id, header_data.data() + ProtocolConstants::CLIENT_ID_SIZE, ProtocolConstants::MESSAGE_ID_SIZE);
+				std::memcpy(&message_type, header_data.data() + ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::MESSAGE_ID_SIZE, ProtocolConstants::MESSAGE_TYPE_SIZE);
+				std::memcpy(&message_content_size, header_data.data() + ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::MESSAGE_ID_SIZE + ProtocolConstants::MESSAGE_TYPE_SIZE, ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE);
 
-				input_stream.read(reinterpret_cast<char*>(&message_id), ProtocolConstants::MESSAGE_ID_SIZE);
-				if (input_stream.fail()) {
-					throw std::runtime_error("Failed to read message_id from the buffer.");
-				}
 				boost::endian::little_to_native_inplace(message_id);
-
-				input_stream.read(reinterpret_cast<char*>(&message_type), ProtocolConstants::MESSAGE_TYPE_SIZE);
-				if (input_stream.fail()) {
-					throw std::runtime_error("Failed to read message_type from the buffer.");
-				}
 				boost::endian::little_to_native_inplace(message_type);
-
-				input_stream.read(reinterpret_cast<char*>(&message_content_size), ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE);
-				if (input_stream.fail()) {
-					throw std::runtime_error("Failed to read message content size from the buffer.");
-				}
 				boost::endian::little_to_native_inplace(message_content_size);
 
 				// Read the message content from the communication
-				size_t message_content_bytes = boost::asio::read(*socket, buffer.prepare(message_content_size));
-				if (message_content_bytes < message_content_size) {
-					throw std::runtime_error("Received data is too short to be a valid response. Not enough bytes for message content");
-				}
-				buffer.commit(message_content_size);
-
-				std::vector<uint8_t> message_content(message_content_size);
-				input_stream.read(reinterpret_cast<char*>(message_content.data()), message_content_size);
-
+				std::vector<uint8_t> message_content = readFixedSize(*socket, message_content_size);
 				payload_size -= message_content_size;
 
 				// Printing the message
 				std::cout << "From: " << handler.getClient(handler.arrayToStringID(client_id))->client_name << endl;
 				std::cout << "Content: " << endl;
+
 				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
 					std::cout << "Request For Symmetric Key" << endl;
 				}
@@ -861,9 +814,8 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 						// Copying the vector which contains an encrypted symmetric key into a string
 						std::string encryptedSymmetricKey(message_content.begin(), message_content.end());
 
-						// TODO maybe change it to compare to the message content size, and not a defined size...
 						if (encryptedSymmetricKey.size() != message_content_size) {
-							std::cerr << "ERROR: Encrypted key size mismatch! Expected 128, got " << encryptedSymmetricKey.size() << std::endl;
+							std::cerr << "ERROR: Encrypted key size mismatch! Expected "<< message_content_size << " bytes, got " << encryptedSymmetricKey.size() << std::endl;
 						}
 
 						// Gathering the decoded private key and creating a decryptor.
@@ -1001,8 +953,6 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		}
 	}
 	catch(const std::exception& e){
-		flushBuffer(buffer, input_stream);
-		socket->close();
 		std::cerr << "Error while parsing server response: " << e.what() << "\n";
 		throw;
 	}
