@@ -154,6 +154,9 @@ namespace ProtocolConstants {
 
 }; // namespace ProtocolConstants
 
+//************************************************
+/* Classes declarations and functions*/
+//************************************************
 
 /* Class declarations for the Request & Message classes
 * All classes inherit from, and are based on the BaseRequest class.

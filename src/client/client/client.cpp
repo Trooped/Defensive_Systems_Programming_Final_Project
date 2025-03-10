@@ -1141,7 +1141,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 			ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY,
 			ProtocolConstants::MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE
 		);
-		cout << "Symmetric key request message sent to client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\".\n";
+		cout << "Symmetric key request message sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
 	}
 	else if (operation_code == ProtocolConstants::Input_Codes::SEND_SYMMETRIC_KEY) {
 		// Generating a symmetric key (if there isn't one)
@@ -1173,7 +1173,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 					encrypted_symmetric_key.size(),
 					encrypted_symmetric_key
 				);
-				cout << "Your shared symmetric key was sent to client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\".\n";
+				cout << "Your shared symmetric key was sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
 			}
 			else {
 				cout << "You need the public key of the destination client to send him a symmetric key.\n";
@@ -1215,7 +1215,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				vec_encrypted_text.size(),
 				vec_encrypted_text
 			);
-			cout << "Your encrypted text message was sent to client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\".\n";
+			cout << "Your encrypted text message was sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
 		}
 		else {
 			cout << "You need a shared symmetric key with a destination client to send him a text message.\n";
@@ -1271,7 +1271,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				vec_encrypted_file.size(),
 				vec_encrypted_file
 			);
-			cout << "Your encrypted file was sent to client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\".\n";
+			cout << "Your encrypted file was sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
 		}
 		else {
 			cout << "You need a shared symmetric key with a destination client to send a file.\n";
