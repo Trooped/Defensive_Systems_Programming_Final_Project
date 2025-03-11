@@ -12,7 +12,7 @@ The text & files being sent are encrypted and decrypted using a 16 byte symmetri
 The symmetric key transferred between clients in the following mechanism:
 0. Client A and Client B register to the server, and create a private and public key.
 1. Client A send a request for the public key of client B
-2. Client A send client B a request for a symmetric key
+2. Client A send client B a request for a symmetric key (** if client A doesn't send this request, client B CAN'T send client A a symmetric key).
 3. Client B receives the request
 4. Client B sends a request for the public key of client A
 5. Client B Creates a symmetric key, encrypts it using client A's public key, and requests to send it to client A
@@ -152,6 +152,8 @@ namespace ProtocolConstants {
     constexpr size_t MAX_PORT_VALUE = 65535;
     const std::string SERVER_FILENAME = "server.info";
     const std::string CLIENT_FILENAME = "me.info";
+    constexpr size_t MIN_RANDOM_FILENAME_LENGTH = 16;
+    constexpr size_t MAX_RANDOM_FILENAME_LENGTH = 32;
 
 }; // namespace ProtocolConstants
 
@@ -311,6 +313,7 @@ struct ClientInfo {
     std::string client_name;
     std::optional<std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE>> public_key;  // Optional field
     std::optional<std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>> symmetric_key;  // Optional field
+    bool symmetric_key_requested; // True if the other client requested a symmetric key
 
     ClientInfo() = default;
 
@@ -347,6 +350,9 @@ public:
     // Sets the Symmetric Key of a specific client.
     bool setSymmetricKey(const std::string& client_id,
         const std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE>& symmetric_key);
+
+    // Sets the SymmetricKeyRequested field of a specific client (which asked for a symmetric key from you) to true.
+    bool setSymmetricKeyRequestedToTrue(const std::string& client_id);
 
     // Get Client id by the client name
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> getClientIDByName(const std::string& name);

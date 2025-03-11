@@ -12,7 +12,7 @@ The text & files being sent are encrypted and decrypted using a 16 byte symmetri
 The symmetric key transferred between clients in the following mechanism:
 0. Client A and Client B register to the server, and create a private and public key.
 1. Client A send a request for the public key of client B
-2. Client A send client B a request for a symmetric key
+2. Client A send client B a request for a symmetric key (** if client A doesn't send this request, client B CAN'T send client A a symmetric key).
 3. Client B receives the request
 4. Client B sends a request for the public key of client A
 5. Client B Creates a symmetric key, encrypts it using client A's public key, and requests to send it to client A
@@ -360,7 +360,7 @@ bool ClientHandler::setPublicKey(const std::string& client_id, const std::array<
 		it->second.public_key = std::make_optional(public_key);
 		return true;
 	}
-	return false; // Client not found
+	return false; // Client not found in list
 }
 
 // Sets the Symmetric Key of a specific client.
@@ -370,7 +370,17 @@ bool ClientHandler::setSymmetricKey(const std::string& client_id, const std::arr
 		it->second.symmetric_key = symmetric_key;
 		return true;
 	}
-	return false; // Client not found
+	return false; // Client not found in list
+}
+
+// Sets the SymmetricKeyRequested field of a specific client (which asked for a symmetric key from you) to true.
+bool ClientHandler::setSymmetricKeyRequestedToTrue(const std::string& client_id) {
+	auto it = clients.find(client_id);
+	if (it != clients.end()) {
+		it->second.symmetric_key_requested = true;
+		return true;
+	}
+	return false; // Client not found in list
 }
 
 // Get Client id by the client name
@@ -398,7 +408,7 @@ std::optional<ClientInfo> ClientHandler::getClient(const std::string& client_id)
 	if (it != clients.end()) {
 		return it->second;
 	}
-	return std::nullopt; // Client not found
+	return std::nullopt; // Client not found in list
 }
 
 // Helper functions to convert the client id array to string and vice versa
@@ -542,13 +552,13 @@ std::string createRandomFileName() {
 	const std::string characters =
 		"abcdefghijklmnopqrstuvwxyz"
 		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-		"0123456789";
+		"0123456789-_";
 
 	std::random_device rd;
 	std::mt19937 gen(rd());
 
 	// Randomize File Name Length (Between 8 and 32 characters)
-	std::uniform_int_distribution<> lengthDist(8, 32);
+	std::uniform_int_distribution<> lengthDist(ProtocolConstants::MIN_RANDOM_FILENAME_LENGTH, ProtocolConstants::MAX_RANDOM_FILENAME_LENGTH);
 	size_t fileNameLength = lengthDist(gen);
 
 	std::uniform_int_distribution<> charDist(0, characters.size() - 1);
@@ -558,7 +568,6 @@ std::string createRandomFileName() {
 	for (size_t i = 0; i < fileNameLength; ++i) {
 		randomFileName += characters[charDist(gen)];
 	}
-
 	return randomFileName;
 }
 
@@ -576,12 +585,12 @@ bool containsOnlyASCII(const std::string& name) {
 bool isValidClientName(const std::string& client_name) {
 	// Ensure name length is within the valid range (1 to 254 characters)
 	if (client_name.empty() || client_name.size() > 254) {
-		cout << "Client name must be at least 1 character and up to 254 characters.\n";
+		std::cout << "Client name must be at least 1 character and up to 254 characters.\n";
 		return false;
 	}
 	// Ensure all characters are ASCII
 	if (!containsOnlyASCII(client_name)) {
-		cout << "Client name can't contain non-ASCII characters.\n";
+		std::cout << "Client name can't contain non-ASCII characters.\n";
 		return false;
 	}
 	return true;
@@ -686,7 +695,7 @@ std::string fetchPrivateKeyFromFile() {
 // Asks the user for a client username, and return the client's ID.
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
 	std::string dest_client_name;
-	cout << "Please enter client name: ";
+	std::cout << "Please enter client name: ";
 
 	std::getline(std::cin, dest_client_name);
 	if (!isValidClientName(dest_client_name)) {
@@ -785,8 +794,8 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			size_t num_of_clients = payload_size / (ProtocolConstants::CLIENT_ID_SIZE + ProtocolConstants::CLIENT_NAME_SIZE);
 
 			if (num_of_clients > 0) {
-				cout << "Client list request is successful.\n";
-				cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
+				std::cout << "Client list request is successful.\n";
+				std::cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
 
 				for (size_t i = 0; i < num_of_clients; i++) {
 					// Read client ID and convert vector -> array
@@ -806,7 +815,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				}
 			}
 			else { // 0 clients
-				cout << "No other clients in server.\n";
+				std::cout << "There are no other clients registered to the server.\n";
 			}
 			socket->close();
 			return std::make_unique<ClientsListResponse>(version, response_code, payload_size);
@@ -827,7 +836,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 			handler.setPublicKey(handler.arrayToStringID(client_id), public_key);
 			socket->close();
-			cout << "Public key of client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\" was fetched from the server and saved.\n";
+			std::cout << "Public key of client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\" was fetched from the server and saved.\n";
 			return std::make_unique<PublicKeyResponse>(version, response_code, payload_size, client_id, public_key);
 		}
 		else if (response_code == ProtocolConstants::Response::MESSAGE_SENT_SUCCESS) {
@@ -850,7 +859,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
 		}
 		else if (response_code == ProtocolConstants::Response::FETCHING_INCOMING_MESSAGES_SUCCESS) {
-			cout << "Printing the incoming messages: " << endl;
+			std::cout << "Printing the incoming messages: " << endl;
 			while (payload_size > 0) {
 				// Read the fixed-size message header
 				std::vector<uint8_t> header_data = readFixedSize(*socket, ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE);
@@ -888,6 +897,9 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
 					std::cout << "Request For Symmetric Key" << endl;
+					if (client_opt.has_value()) { // If the client ID is in the clients list, set his "symmetric_key_requested" to true.
+						handler.setSymmetricKeyRequestedToTrue(handler.arrayToStringID(client_id));
+					}
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_SYMMETRICAL_KEY) {
 					std::cout << "Symmetric Key Received" << endl;
@@ -989,7 +1001,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		else if (response_code == ProtocolConstants::Response::GENERAL_ERROR)
 		{
 			socket->close();
-			cout << "Server responded with an error." << endl;
+			std::cout << "Server responded with an error." << endl;
 			return std::make_unique<ErrorResponse>(version, response_code, payload_size);
 		}
 		else {
@@ -1012,10 +1024,10 @@ void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr
 	}
 
 	string username;
-	cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
+	std::cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
 	std::getline(std::cin, username);
 	if (!isValidClientName(username)) {
-		cout << "Invalid client name." << endl;
+		std::cout << "Invalid client name." << endl;
 		return;
 	}
 
@@ -1044,21 +1056,21 @@ void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr
 	// Send the registration request
 	request->sendRequest(socket);
 
-	cout << "Sent a register request to the server with the username: " << username << endl;
+	std::cout << "Sent a register request to the server with the username: " << username << endl;
 
 	// Receive a response
 	response = parseResponse(socket);
 
 	// Getting the client_id from the RegisterResponse class
 	if (auto* regResponse = dynamic_cast<RegisterResponse*>(response.get())) {
-		cout << "Register operation is successful.\n";
+		std::cout << "Register operation is successful.\n";
 		auto clientID = regResponse->getClientID();
 		CreateClientInfoFile(filename, username, clientID, priv_base64key);
 	}
 	else {
 		throw std::runtime_error("Expected RegisterResponse, but received a different response type.");
 	}
-	cout << "New client details are saved in me.info file." << endl;
+	std::cout << "New client details are saved in me.info file." << endl;
 }
 
 // Handles the logic to make a clients list request
@@ -1135,6 +1147,8 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 
 	std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> dest_client_id = inputUsernameAndGetClientID();
 
+	std::string dest_client_name = handler.getClient(handler.arrayToStringID(dest_client_id))->client_name;
+
 	if (operation_code == ProtocolConstants::Input_Codes::REQUEST_SYMMETRIC_KEY) {
 		request = make_unique<symmetricKeyRequestMessage>(
 			client_id,
@@ -1145,59 +1159,65 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 			ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY,
 			ProtocolConstants::MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE
 		);
-		cout << "Symmetric key request message sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
+		std::cout << "Symmetric key request message sent to client \"" << dest_client_name << "\".\n";
 	}
 	else if (operation_code == ProtocolConstants::Input_Codes::SEND_SYMMETRIC_KEY) {
-		// Generating a symmetric key (if there isn't one)
-		if (!(handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) {
-			unsigned char symmetric_key[ProtocolConstants::SYMMETRIC_KEY_SIZE] = {};
-			AESWrapper aes(AESWrapper::GenerateKey(symmetric_key, ProtocolConstants::SYMMETRIC_KEY_SIZE), ProtocolConstants::SYMMETRIC_KEY_SIZE);
+		if (handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key_requested == true) {
+			// Generating a symmetric key (if there isn't one)
+			if (!(handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) {
+				unsigned char symmetric_key[ProtocolConstants::SYMMETRIC_KEY_SIZE] = {};
+				AESWrapper aes(AESWrapper::GenerateKey(symmetric_key, ProtocolConstants::SYMMETRIC_KEY_SIZE), ProtocolConstants::SYMMETRIC_KEY_SIZE);
 
-			// Encrypting the symmetric key using the destination client's public key
-			if ((handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).has_value()) {
-				std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> dest_pub_key = (handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).value();
-				std::string dest_pub_key_str(dest_pub_key.begin(), dest_pub_key.end());
+				// Encrypting the symmetric key using the destination client's public key
+				if ((handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).has_value()) {
+					std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> dest_pub_key = (handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).value();
+					std::string dest_pub_key_str(dest_pub_key.begin(), dest_pub_key.end());
 
-				RSAPublicWrapper rsapub(dest_pub_key_str);
-				std::string encrypted_symmetric_key = rsapub.encrypt((const char*)symmetric_key, sizeof(symmetric_key));
+					RSAPublicWrapper rsapub(dest_pub_key_str);
+					std::string encrypted_symmetric_key = rsapub.encrypt((const char*)symmetric_key, sizeof(symmetric_key));
 
-				// Copying the char[] array symmetric key into uint8_t array for easy sending and storage.
-				std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symm_key_arr;
-				std::copy(std::begin(symmetric_key), std::end(symmetric_key), symm_key_arr.begin());
+					// Copying the char[] array symmetric key into uint8_t array for easy sending and storage.
+					std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symm_key_arr;
+					std::copy(std::begin(symmetric_key), std::end(symmetric_key), symm_key_arr.begin());
 
-				handler.setSymmetricKey(handler.arrayToStringID(dest_client_id), symm_key_arr); // Setting the symmetric key for the target client
+					handler.setSymmetricKey(handler.arrayToStringID(dest_client_id), symm_key_arr); // Setting the symmetric key for the target client
 
-				request = make_unique<symmetricKeySendMessage>(
-					client_id,
-					ProtocolConstants::CLIENT_VERSION,
-					ProtocolConstants::Request::SEND_MESSAGE,
-					ProtocolConstants::MESSAGE_REQUEST_HEADER_SIZE + encrypted_symmetric_key.size(),
-					dest_client_id,
-					ProtocolConstants::Message::SEND_SYMMETRICAL_KEY,
-					encrypted_symmetric_key.size(),
-					encrypted_symmetric_key
-				);
-				cout << "Your shared symmetric key was sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
+					request = make_unique<symmetricKeySendMessage>(
+						client_id,
+						ProtocolConstants::CLIENT_VERSION,
+						ProtocolConstants::Request::SEND_MESSAGE,
+						ProtocolConstants::MESSAGE_REQUEST_HEADER_SIZE + encrypted_symmetric_key.size(),
+						dest_client_id,
+						ProtocolConstants::Message::SEND_SYMMETRICAL_KEY,
+						encrypted_symmetric_key.size(),
+						encrypted_symmetric_key
+					);
+					std::cout << "Your shared symmetric key was sent to client \"" << dest_client_name << "\".\n";
+				}
+				else {
+					std::cout << "You need the public key of the destination client to send him a symmetric key.\n";
+					return;
+				}
 			}
 			else {
-				cout << "You need the public key of the destination client to send him a symmetric key.\n";
+				std::cout << "You already have a shared symmetric key with this client.\n";
 				return;
 			}
 		}
 		else {
-			cout << "You already have a shared symmetric key with this client.\n";
+			std::cout << "You can't send a symmetric key to \"" << dest_client_name << "\" until they send you a request for a symmetric key.\n";
 			return;
 		}
 	}
 	else if (operation_code == ProtocolConstants::Input_Codes::SEND_TEXT_MESSAGE_CODE) {
 		if ((handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // If there is a symmetric key with the other client
 			std::string text_input;
-			cout << "Please enter the required text message to send: \n";
+			std::cout << "Please enter the required text message to send: \n";
 			std::getline(std::cin, text_input);
 
 			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
 			if (text_input.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
-				cout << "Input is too big to fit (more than 2^32 -1 characters). Truncating it to fit.\n";
+				std::cout << "Input is too big to fit (more than 2^32 -1 characters). Truncating it to fit.\n";
 				text_input = text_input.substr(0, ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE);
 			}
 
@@ -1219,17 +1239,17 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				vec_encrypted_text.size(),
 				vec_encrypted_text
 			);
-			cout << "Your encrypted text message was sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
+			std::cout << "Your encrypted text message was sent to client \"" << dest_client_name << "\".\n";
 		}
 		else {
-			cout << "You need a shared symmetric key with a destination client to send him a text message.\n";
+			std::cout << "You need a shared symmetric key with " << dest_client_name << " to them send a text message.\n";
 			return;
 		}
 	}
 	else if(operation_code == ProtocolConstants::Input_Codes::SEND_FILE){ 
 		if ((handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // If there is a symmetric key with another client
 			std::string file_path;
-			cout << "Please enter the full path to the file you want to send (ASCII only path): \n";
+			std::cout << "Please enter the full path to the file you want to send (ASCII only path): \n";
 			std::getline(std::cin, file_path);
 
 			// Validating the file name and file content.
@@ -1255,7 +1275,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 
 			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
 			if (file_content.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
-				cout << "File is too big to fit (more than 2^32 -1 characters). Cancelling file send request\n";
+				std::cout << "File is too big to fit (more than 2^32 -1 characters). Cancelling file send request\n";
 				return;
 			}
 
@@ -1276,10 +1296,10 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				vec_encrypted_file.size(),
 				vec_encrypted_file
 			);
-			cout << "Your encrypted file was sent to client \"" << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << "\".\n";
+			std::cout << "Your encrypted file was sent to client \"" << dest_client_name << "\".\n";
 		}
 		else {
-			cout << "You need a shared symmetric key with a destination client to send a file.\n";
+			std::cout << "You need a shared symmetric key with " << dest_client_name <<" to them send a file.\n";
 			return;
 		}
 	}
@@ -1296,14 +1316,14 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 		std::unique_ptr<BaseResponse> response;
 		ClientHandler& handler = ClientHandler::getInstance();
 
-		cout << "\n";
+		std::cout << "\n";
 		if (!doesFileExist(ProtocolConstants::CLIENT_FILENAME) && operation_code != ProtocolConstants::Input_Codes::REGISTER) {
-			cout << "You must register to the server before making any other requests.\n";
+			std::cout << "You must register to the server before making any other requests.\n";
 			return;
 		}
 
 		if (handler.numOfClients() == 0 && (operation_code != ProtocolConstants::Input_Codes::REGISTER && operation_code != ProtocolConstants::Input_Codes::CLIENTS_LIST)) {
-			cout << "Please ask for clients list before making requests directed to other clients (requests 130 - 153).\n";
+			std::cout << "Please ask for clients list before making requests directed to other clients (requests 130 - 153).\n";
 			return;
 		}
 
@@ -1325,7 +1345,7 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 			handleMessageSend(operation_code, request, response, serverConnection);
 		}
 		else {
-			cout << "Please enter one of the valid options.\n";
+			std::cout << "Please enter one of the valid options.\n";
 		}
 	}
 	catch (const std::exception& e) {
@@ -1340,14 +1360,14 @@ int main() {
 	try {
 		while (true) {
 			int responseCode;
-			cout << "MessageU client at your service.\n" << endl;
-			cout << "110) Register\n120) Request for clients list\n130) Request for public key\n140) Request for waiting messages" << endl;
-			cout << "150) Send a text message\n151) Send a request for symmetric key\n152) Send your symmetric key\n153) Send a file\n0) Exit client\n?" << endl;
+			std::cout << "MessageU client at your service.\n" << endl;
+			std::cout << "110) Register\n120) Request for clients list\n130) Request for public key\n140) Request for waiting messages" << endl;
+			std::cout << "150) Send a text message\n151) Send a request for symmetric key\n152) Send your symmetric key\n153) Send a file\n0) Exit client\n?" << endl;
 			if (cin >> responseCode) {
 				std::cin.ignore(std::numeric_limits<std::streamsize>::max(), '\n'); // Clear newline
 
 				if (responseCode == ProtocolConstants::Input_Codes::EXIT_CLIENT) {
-					cout << "\nThanks for using MessageU!" << endl;
+					std::cout << "\nThanks for using MessageU!" << endl;
 					break;
 				}
 				else {
@@ -1355,11 +1375,11 @@ int main() {
 				}
 			}
 			else { //Non numberical input, clear the input stream!
-				cout << "Non-numberical input detected. Please enter one of the valid options.\n";
+				std::cout << "Non-numberical input detected. Please enter one of the valid options.\n";
 				cin.clear();
 				cin.ignore(numeric_limits<streamsize>::max(), '\n');
 			}
-			cout << "-----------------------------------------------------" << endl;
+			std::cout << "-----------------------------------------------------" << endl;
 		}
 	}
 	catch (const std::exception& e) {
