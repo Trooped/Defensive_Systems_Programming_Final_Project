@@ -349,8 +349,9 @@ ErrorResponse::ErrorResponse(uint8_t version, uint16_t response_code, uint32_t p
 * Used as a Singleton class (meaning one instance that is initiated in runtime and used throughout the code, and accessed from anywhere.
 * Contains a map of (client id : ClientInfo struct), to change/access other clients info throughout runtime. Saved on memory only.
 */
+// Adds a client to the clients map, if it doesn't exist.
 void ClientHandler::addClient(const std::string& client_id, const std::string& client_name) {
-	clients[client_id] = ClientInfo(client_name);
+	clients.insert({ client_id, ClientInfo(client_name) });
 }
 
 // Sets the Public Key of a specific client.
