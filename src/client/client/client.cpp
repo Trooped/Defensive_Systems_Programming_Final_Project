@@ -986,7 +986,8 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		else if (response_code == ProtocolConstants::Response::GENERAL_ERROR)
 		{
 			socket->close();
-			throw std::runtime_error("Received a general server error (code 9000)");
+			cout << "Server responded with an error." << endl;
+			return std::make_unique<ErrorResponse>(version, response_code, payload_size);
 		}
 		else {
 			flushBuffer(buffer, input_stream);
@@ -996,7 +997,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 	}
 	catch(const std::exception& e){
 		std::cerr << "Error while parsing server response: " << e.what() << "\n";
-		throw;
+		throw; // TODO maybe not throw here? maybe i want it to end here?
 	}
 }
 
