@@ -850,7 +850,14 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				payload_size -= message_content_size;
 
 				// Printing the message
-				std::cout << "From: " << handler.getClient(handler.arrayToStringID(client_id))->client_name << endl;
+				auto client_opt = handler.getClient(handler.arrayToStringID(client_id));
+
+				if (client_opt.has_value()) {
+					std::cout << "From: " << client_opt->client_name << std::endl;
+				}
+				else {
+					std::cerr << "\nWARNING: Client ID not found in the list. Can't print sender name.\nMake sure to ask for an updated clients list.\n";
+				}
 				std::cout << "Content: " << endl;
 
 				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
