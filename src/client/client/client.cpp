@@ -1013,7 +1013,6 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 	}
 	catch(const std::exception& e){
 		std::cerr << "Error while parsing server response: " << e.what() << "\n";
-		throw; // TODO maybe not throw here? maybe i want it to end here?
 	}
 }
 
@@ -1067,11 +1066,9 @@ void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr
 		std::cout << "Register operation is successful.\n";
 		auto clientID = regResponse->getClientID();
 		CreateClientInfoFile(filename, username, clientID, priv_base64key);
+
+		std::cout << "New client details are saved in me.info file." << endl;
 	}
-	else {
-		throw std::runtime_error("Expected RegisterResponse, but received a different response type.");
-	}
-	std::cout << "New client details are saved in me.info file." << endl;
 }
 
 // Handles the logic to make a clients list request
@@ -1100,15 +1097,6 @@ void handleClientsListAndFetchMessagesRequest(int operation_code, std::unique_pt
 
 	// Managing the response
 	response = parseResponse(socket);
-
-	/*
-	if (operation_code == ProtocolConstants::Input_Codes::CLIENTS_LIST) {
-		auto* listResponse = dynamic_cast<ClientsListResponse*>(response.get());
-		if (!listResponse) {
-			throw std::runtime_error("Expected ListResponse, but received a different response type.");
-		}
-	}
-	*/ //TODO do i even need to validate it...?
 }
 
 // Handles the public key request
@@ -1384,7 +1372,7 @@ int main() {
 		}
 	}
 	catch (const std::exception& e) {
-		std::cerr << "Error: " << e.what() << "\n";
+		std::cerr << "Client Error: " << e.what() << "\n";
 	}
 	return 0;
 }
@@ -1601,16 +1589,4 @@ std::string AESWrapper::decrypt(const char* cipher, unsigned int length)
 	stfDecryptor.MessageEnd();
 
 	return decrypted;
-}
-
-// TODO delete it maybbe???????????
-void hexify(const unsigned char* buffer, unsigned int length)
-{
-	std::ios::fmtflags f(std::cout.flags());
-	std::cout << std::hex;
-	for (size_t i = 0; i < length; i++)
-		std::cout << std::setfill('0') << std::setw(2) << (0xFF & buffer[i]) << (((i + 1) % 16 == 0) ? "\n" : " ");
-	std::cout << std::endl;
-	std::cout.flags(f);
-	std::dec;
 }
