@@ -32,34 +32,35 @@ import uuid
 from datetime import datetime
 from enum import Enum
 import sqlite3
-import os
 from typing import Any
 
 # general constants:
 VERSION_NUMBER = 2
+SOCKET_CHUNK_SIZE = 1024
 
 
 class MessageType(Enum):
     """
-    Each message contains:
-    - Client ID
-    - Message Type
-    - Content size (message size)
-    - Message content
-    This class focuses on the different message types.
+    Message Type Codes.
     """
     SYMMETRICAL_KEY_REQUEST = 1  # Message content is empty and Content Size = 0
     SYMMETRICAL_KEY_SEND = 2  # Message content has a symmetrical key, encrypted by the public key of the target client
-    SEND_TEXT_MESSAGE = 3  # Message content contains text encrypted by the symmetrical key
-    SEND_FILE_MESSAGE = 4
+    SEND_TEXT_MESSAGE = 3  # Message content contains text encrypted by the symmetric key
+    SEND_FILE_MESSAGE = 4  # Message content contains file content encrypted by the symmetric key
 
 
 class MessageOffset(Enum):
+    """
+    Each message contains:
+    - Destination Client ID
+    - Message Type
+    - Content size (message size)
+    - Message content (if applicable)
+    """
     MIN_MESSAGE_SIZE = 21
     TO_CLIENT_ID_MESSAGE_SIZE = 16
     MESSAGE_TYPE_SIZE = 1
     MESSAGE_CONTENT_SIZE = 4
-    FROM_CLIENT_MESSAGE_SIZE = 16
 
 
 class RequestOffset(Enum):
@@ -79,6 +80,9 @@ class RequestOffset(Enum):
 
 
 class RequestFieldsSizes(Enum):
+    """
+    Request fields sizes.
+    """
     CLIENT_NAME_SIZE = 255
     PUBLIC_KEY_SIZE = 160
     CLIENT_ID_SIZE = 16
@@ -87,6 +91,9 @@ class RequestFieldsSizes(Enum):
 
 
 class ResponseFieldsSizes(Enum):
+    """
+    Response Fields Sizes.
+    """
     VERSION_SIZE = 1
     RESPONSE_CODE_SIZE = 2
     PAYLOAD_SIZE = 4
@@ -99,10 +106,12 @@ class ResponseFieldsSizes(Enum):
 
 
 class EncryptionKeysSizes(Enum):
+    """
+    Encryption Keys sizes.
+    """
     SYMMETRIC_KEY_SIZE = 16  # bytes
     PRIVATE_KEY_SIZE = 128  # bytes
     PUBLIC_KEY_SIZE = 160  # bytes
-    ENCRYPTED_SYMMETRIC_KEY_SIZE = 128  # bytes
 
 
 class RequestType(Enum):
@@ -121,31 +130,24 @@ class RequestType(Enum):
 
 class ResponseType(Enum):
     """
-    Here we define the different response types. The general structure is:
-    - Server version (1 byte)
-    - Response Code (2 bytes)
-    - Payload Size (4 bytes)
-    - Payload (changing)
+    Here we define the different response types' numbers.
     """
-    CLIENT_REGISTER_REQUEST_SUCCESS = 2100  # Payload will be the Client ID
-    CLIENT_LIST_REQUEST_SUCCESS = 2101  # Payload will contain the Client ID, + \
+    CLIENT_REGISTER_RESPONSE_SUCCESS = 2100  # Payload will be the Client ID
+    CLIENT_LIST_RESPONSE_SUCCESS = 2101  # Payload will contain the Client ID,
     # followed by all client names but the requesting Client.
-    PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST_SUCCESS = 2102  # client ID + public key
-    SEND_MESSAGE_REQUEST_SUCCESS = 2103  # Client ID + Message ID
-    RECEIVE_INCOMING_MESSAGES_SUCCESS = 2104  # Client ID + Message ID + Message Type + \
-    # Message Size + Message content (ONE MESSAGE AFTER THE OTHER)
-    GENERAL_ERROR = 9000  # Payload field is empty, Payload size = 0
-
-
-# TODO add a validate username function!!!!!!!!!!!!!
-def validate_username(username: str):
-    if len(username) > RequestFieldsSizes.CLIENT_NAME_SIZE.value:
-        raise ValueError("Invalid username. The username must not exceed 255 characters.")
-    if not username.isascii():
-        raise ValueError("Invalid username. The username must not contain any special characters.")
+    PUBLIC_KEY_OF_OTHER_CLIENT_RESPONSE_SUCCESS = 2102  # client ID + public key
+    SEND_MESSAGE_RESPONSE_SUCCESS = 2103  # Client ID + Message ID
+    RECEIVE_INCOMING_MESSAGES_RESPONSE_SUCCESS = 2104  # Client ID + Message ID + Message Type
+    # + Message Size + Message content (ONE MESSAGE AFTER THE OTHER)
+    GENERAL_ERROR_RESPONSE = 9000  # Payload field is empty, Payload size = 0
 
 
 class Database:
+    """
+    Database class - responsible for creating and maintaining the database
+    that holds the clients and messages tables, which hold all the registered clients
+    and all the messages between clients respectively.
+    """
     DB_FILENAME = "defensive.db"
     CLIENTS_TABLE_NAME = "clients"
     MESSAGES_TABLE_NAME = "messages"
@@ -173,7 +175,7 @@ class Database:
         """Get a client by their username."""
         cursor = self.connection.cursor()
         try:
-            validate_username(username)  # Validate the given username
+            self.validate_username(username)  # Validate the given username
             cursor.execute(
                 f"SELECT * FROM {self.CLIENTS_TABLE_NAME} WHERE name = ?;", (username,)
             )
@@ -201,7 +203,7 @@ class Database:
             message_id = cursor.lastrowid
             return message_id
         except Exception as e:
-            print(f"ERROR: unable to insert message into DB: {e}")
+            raise ValueError(f"ERROR: unable to insert message into DB: {e}")
         finally:
             cursor.close()
 
@@ -218,15 +220,13 @@ class Database:
             )
             result = cursor.fetchone()
         except Exception as e:
-            print(f"ERROR: Failed to fetch public key for ID '{client_id}': {e}")
-            return None  # Return None in case of an error
+            raise ValueError(f"ERROR: Failed to fetch public key for ID '{client_id}': {e}")
         finally:
             cursor.close()  # Ensure the cursor is closed
 
         # Check if the client exists
         if result is None:
-            print(f"WARNING: No client found with ID '{client_id}'.")
-            return None
+            raise ValueError(f"WARNING: No client found with ID '{client_id}'.")
 
         return result[0]  # Return the public key as bytes
 
@@ -237,7 +237,7 @@ class Database:
         cursor = self.connection.cursor()
         try:
             # Validate the username
-            validate_username(username)
+            self.validate_username(username)
 
             # Ensure the client doesn't already exist
             if self.does_client_exist(username):
@@ -246,19 +246,13 @@ class Database:
             # Generate a server-side client ID
             server_client_id = uuid.uuid4()
 
-            # TODO don't insert the datetime here, just call the function that does it in the end, or generally whenever there's a database access.
             # Insert the client into the database
             cursor.execute(
                 f"INSERT INTO {self.CLIENTS_TABLE_NAME} (id, name, public_key, last_seen) VALUES (?, ?, ?, ?);",
-                (server_client_id.bytes, username, bytes(RequestFieldsSizes.PUBLIC_KEY_SIZE.value),
+                (server_client_id.bytes, username, public_key,
                  datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
             )
             self.connection.commit()
-
-            # Optionally update the public key
-            if public_key:
-                self.insert_public_key(username, public_key)
-
             return server_client_id
 
         except ValueError as ve:
@@ -270,41 +264,22 @@ class Database:
         finally:
             cursor.close()
 
-    def insert_public_key(self, username: str, public_key: bytes):
+    def validate_username(self, username: str):
         """
-        Insert or update the public key for a specific client in the database.
+        Validates the username entered, according to the protocol standards.
         """
-        cursor = self.connection.cursor()
-        try:
-            cursor.execute(
-                f"UPDATE {self.CLIENTS_TABLE_NAME} SET public_key = ? WHERE name = ?;",
-                (public_key, username)
-            )
-            if cursor.rowcount == 0:  # Check if the update affected any rows
-                raise ValueError(f"Client '{username}' does not exist in the database.")
-            self.connection.commit()
-            print(f"Public key updated for client '{username}'.")
-        except ValueError as e:
-            print(f"Error: {e}")
-            raise
-        except Exception as e:
-            print(f"Error updating public key for client '{username}': {e}")
-        finally:
-            cursor.close()
+        if len(username) >= RequestFieldsSizes.CLIENT_NAME_SIZE.value or len(username) < 1:
+            raise ValueError("Invalid username. The username must be between 1 and 254 characters.")
+        if not username.isascii():
+            raise ValueError("Invalid username. The username must not contain any special characters (ASCII only).")
 
     def fetch_all_registered_clients(self, username: str) -> list:
-        """Fetch all registered clients' usernames except the one specified."""
+        """Fetch all registered clients' usernames except the one supplied in the parameter."""
         cursor = self.connection.cursor()
         try:
-
-            cursor.execute(f"SELECT id, name FROM {self.CLIENTS_TABLE_NAME};")
-            all_users = cursor.fetchall()
-            print(f"DEBUG: All Users in DB: {all_users}")
-
             cursor.execute(f"SELECT id, name FROM {self.CLIENTS_TABLE_NAME} WHERE name != ?;", (username,))
             results = cursor.fetchall()
 
-            print(f"DEBUG: Excluding '{username}', Found: {results}")
             return results
         except Exception as e:
             print(f"Error fetching registered clients: {e}")
@@ -354,9 +329,8 @@ class Database:
 
     def fetch_messages_to_client(self, to_client_id: bytes) -> list:
         """
-        Fetch all messages for a given to_client ID.
-        Returns a list of [username, content] for each message.
-        Deletes the messages after fetching them.
+        Fetch all messages for a given client (using his client ID).
+        Returns a list of [message_id, from_client_id, message_type, content] tuples for each message.
         """
         cursor = self.connection.cursor()
         messages = []
@@ -378,12 +352,11 @@ class Database:
             print(f"ERROR: Failed to fetch messages for to_client ID '{to_client_id}': {e}")
         finally:
             cursor.close()  # Ensure the cursor is closed
-
         return messages
 
     def delete_messages_to_client(self, to_client_id: bytes) -> None:
         """
-        Delete all messages for a given to_client ID.
+        Delete all the messages destined for a client.
         """
         cursor = self.connection.cursor()
         try:
@@ -398,8 +371,11 @@ class Database:
             cursor.close()  # Ensure the cursor is closed
 
     def create_tables(self):
+        """
+        Creates the clients and messages tables in the DB if they don't exist.
+        """
+        cursor = self.connection.cursor()
         try:
-            cursor = self.connection.cursor()
             cursor.execute(
                 f"""CREATE TABLE IF NOT EXISTS {self.CLIENTS_TABLE_NAME} (
                         id BLOB(16) PRIMARY KEY,
@@ -417,7 +393,7 @@ class Database:
                         content BLOB
                     )"""
             )
-            print("Tables created successfully, or already exist")
+            print("Clients and Messages tables were created successfully, or already exist in the database")
         except Exception as e:
             print(f"ERROR: Failed to create tables: {e}")
         finally:
@@ -429,12 +405,6 @@ class Message:
     A general Message class that is responsible for parsing the received message and initializing it with the
     appropriate parameters.
     """
-
-    # Message types
-    SYMMETRICAL_KEY_REQUEST_MESSAGE = 1
-    SYMMETRICAL_KEY_SEND_MESSAGE = 2
-    TEXT_SEND_MESSAGE = 3
-    FILE_SEND_MESSAGE = 4
 
     def __init__(self, message_bytes=b""):
         self.message_header_bytes = message_bytes
@@ -449,7 +419,9 @@ class Message:
         # self.parse_message()
 
     def _extract_bytes(self, relevant_bytes, size, field_name):
-        """Extracts a fixed-size byte field from the request bytes."""
+        """
+        Utility function that extracts a fixed-size byte field from the request bytes.
+        """
         if len(relevant_bytes) < self.offset + size:
             raise ValueError(f"Message too short. No valid {field_name} field received.")
 
@@ -458,7 +430,9 @@ class Message:
         return extracted_bytes
 
     def _extract_int(self, relevant_bytes, size, fmt, field_name):
-        """Extracts an integer (of given size & format) from the request bytes and updates the offset."""
+        """
+        Utility function that extracts an integer (of given size & format) from the request bytes and updates the offset.
+        """
         if len(relevant_bytes) < self.offset + size:
             raise ValueError(f"Message too short. No valid {field_name} field received.")
 
@@ -473,11 +447,15 @@ class Message:
         try:
             min_message_size = MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value
             if len(self.message_header_bytes) < min_message_size:
-                raise ValueError(f"Message header is too short. expected {min_message_size} but got {len(self.message_header_bytes)}.")
+                raise ValueError(
+                    f"Message header is too short. expected {min_message_size} but got {len(self.message_header_bytes)}.")
 
-            self.target_client_id = self._extract_bytes(self.message_header_bytes, MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value, "Client ID")
-            self.message_type = self._extract_int(self.message_header_bytes, MessageOffset.MESSAGE_TYPE_SIZE.value, '<B', "Message type")
-            self.content_size = self._extract_int(self.message_header_bytes, MessageOffset.MESSAGE_CONTENT_SIZE.value, '<I', "Message content size")
+            self.target_client_id = self._extract_bytes(self.message_header_bytes,
+                                                        MessageOffset.TO_CLIENT_ID_MESSAGE_SIZE.value, "Client ID")
+            self.message_type = self._extract_int(self.message_header_bytes, MessageOffset.MESSAGE_TYPE_SIZE.value,
+                                                  '<B', "Message type")
+            self.content_size = self._extract_int(self.message_header_bytes, MessageOffset.MESSAGE_CONTENT_SIZE.value,
+                                                  '<I', "Message content size")
 
         except Exception as e:
             print(f"Unexpected error while parsing basic message header bytes: {e}")
@@ -486,8 +464,6 @@ class Message:
     def parse_message_content(self, content):
         """
         Parses the message content bytes received from the server and updates the message content field.
-        :param content: TODO delete this or make all of the functions and classes like this.
-        :return:
         """
         try:
             self.message_content_bytes = content
@@ -495,23 +471,20 @@ class Message:
                 raise ValueError(f"Mismatch between content size: {self.content_size} and \
                 content bytes: {len(self.message_content_bytes)} received.")
 
-            if self.message_type == self.SYMMETRICAL_KEY_REQUEST_MESSAGE:
+            if self.message_type == MessageType.SYMMETRICAL_KEY_REQUEST.value:
                 if self.content_size != 0:
                     raise ValueError(f"Invalid message. Symmetrical key request message must be empty, \
                     and content size is {self.content_size} bytes.")
 
-            elif self.message_type == self.SYMMETRICAL_KEY_SEND_MESSAGE:
+            elif self.message_type == MessageType.SYMMETRICAL_KEY_SEND.value:
                 self.message_content = struct.unpack('<128s', self.message_content_bytes[:self.content_size])[0]
 
-            elif self.message_type == self.TEXT_SEND_MESSAGE:
+            elif self.message_type == MessageType.SEND_TEXT_MESSAGE.value:
                 self.message_content = self.message_content_bytes[:self.content_size]
-                print("DEBUG: ", self.message_content)
-                print("DEBUG: ", len(self.message_content))
 
                 # todo same as above, validate length matching and correct type etc...
 
-            elif self.message_type == self.FILE_SEND_MESSAGE:
-                # TODO change this to be like the above.
+            elif self.message_type == MessageType.SEND_FILE_MESSAGE.value:
                 self.message_content = self.message_content_bytes[:self.content_size]
 
             else:
@@ -521,7 +494,13 @@ class Message:
             print(f"Unexpected error while parsing message content bytes: {e}")
             raise
 
+
 class Request:
+    """
+    Request class - responsible for parsing the request bytes from the client,
+    And then building the request object, with all the relevant fields.
+    """
+
     def __init__(self, request_bytes):
         self.request_bytes = request_bytes
         self.client_id = None
@@ -530,7 +509,7 @@ class Request:
         self.offset = 0
         self.payload_size = None
 
-        self.parse_request_header()  # Initializing all the fields above.
+        self.parse_request_header()  # Initializing all of the above fields.
 
         """different payload fields, depending on the request (601 and 604 are empty):"""
         if self.request_code == RequestType.REGISTER_REQUEST.value:  # case 600
@@ -542,7 +521,9 @@ class Request:
             self.message = None
 
     def parse_request_header(self):
-        """Parses the request that came from the client and calls the appropriate functions"""
+        """
+        Parses the request header that came from the client request.
+        """
         try:
             min_size = RequestOffset.MIN_REQUEST_SIZE.value
             # The minimum size of a request is 23 bytes (client id + version + code + payload size)
@@ -550,7 +531,7 @@ class Request:
                 raise ValueError(
                     f"Request too short. Expected at least {min_size} bytes, got {len(self.request_bytes)}.")
 
-            # Gather all of the relevant fields of a basic request
+            # Gather all the relevant fields of a basic request
             self.client_id = self.extract_bytes(RequestOffset.CLIENT_ID_SIZE.value, "Client ID")
             self.client_version = self._extract_int(RequestOffset.CLIENT_VERSION_SIZE.value, "<B", "Client Version")
             self.request_code = self._extract_int(RequestOffset.REQUEST_CODE_SIZE.value, "<H", "Request Code")
@@ -622,7 +603,9 @@ class Request:
             print(f"Unexpected error: {e}")
 
     def _extract_int(self, size, fmt, field_name):
-        """Extracts an integer (of given size & format) from the request bytes and updates the offset."""
+        """
+        Utility function that extracts an integer (of given size & format) from the request bytes and updates the offset.
+        """
         if len(self.request_bytes) < self.offset + size:
             raise ValueError(f"Request too short. No valid {field_name} field received.")
 
@@ -631,7 +614,9 @@ class Request:
         return extracted_value
 
     def extract_client_name(self, size):
-        "Extracts the client name from the request bytes, removing the null padding."
+        """
+        Utility function that extracts the client name from the request bytes, removing the null padding.
+        """
         if len(self.request_bytes) < self.offset + size:
             raise ValueError("Request is too short, no valid client name was received")
 
@@ -643,7 +628,9 @@ class Request:
         return name
 
     def extract_bytes(self, size, field_name):
-        """Extracts a fixed-size byte field from the request bytes."""
+        """
+        Extracts a fixed-size byte field from the request bytes.
+        """
         if len(self.request_bytes) < self.offset + size:
             raise ValueError(f"Request too short. No valid {field_name} field received.")
 
@@ -652,7 +639,9 @@ class Request:
         return extracted_bytes
 
     def parse_payload(self):
-        """Parsing the payload according to the request type"""
+        """
+        Parsing the request payload according to the request type.
+        """
         try:
             # Client list or waiting message request
             if self.request_code in [RequestType.CLIENT_LIST_REQUEST.value,
@@ -709,7 +698,9 @@ class Request:
 
 
 class ClientManager:
-    CHUNK_SIZE = 1024
+    """
+    ClientManager class, used to manage client request and response
+    """
 
     def __init__(self, conn, db, sel):
         self.socket = conn
@@ -722,7 +713,7 @@ class ClientManager:
         self.message_id = None
 
     def receive_exact_bytes(self, num_bytes):
-        """Reads exactly num_bytes from the socket, making sure all data is received"""
+        """Utility function that reads exactly num_bytes from the socket, making sure all data is received"""
         received_data = b""
         while len(received_data) < num_bytes:
             chunk = self.socket.recv(num_bytes - len(received_data))
@@ -758,9 +749,15 @@ class ClientManager:
 
             self.request = Request(request_bytes)
 
+            # Checks if the user is registered before making ANY other request.
+            username = self.db.get_username_by_uuid(self.request.client_id)
+            if self.request.request_code != RequestType.REGISTER_REQUEST.value and (
+                    username is None or not self.db.does_client_exist(username)):
+                raise ValueError("Unregistered user attempts to make a request, cancelling request processing.")
+
             if self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
                 self.process_message_request()
-                return True
+                return
 
             payload_size = self.request.payload_size
             if payload_size > 0:
@@ -768,20 +765,20 @@ class ClientManager:
                 self.request.request_bytes = request_bytes + payload_bytes
                 self.request.parse_payload()
 
-            return True
         except Exception as e:
             raise ValueError(f"Request parsing error: {e}")
 
     def process_request(self):
         """
-            Parses the incoming request and processes it accordingly.
-            """
+        Receives the incoming request and processes it.
+        """
         self.receive_and_process_request()
         print("Finished parsing request")
 
         request_code = self.request.request_code
-        if request_code in [RequestType.CLIENT_LIST_REQUEST.value, RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value, RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value]:
-            return # There is no request handling logic for the above request, only data gathering, which will be done in the generate_response
+        if request_code in [RequestType.CLIENT_LIST_REQUEST.value, RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value,
+                            RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value]:
+            return  # There is no request handling logic for the above requests, only data gathering, which will be done in the generate_response
         elif request_code == RequestType.REGISTER_REQUEST.value:
             self.handle_register_request()
         elif request_code == RequestType.SEND_MESSAGE_REQUEST.value:
@@ -807,7 +804,6 @@ class ClientManager:
             else:
                 self.db.update_last_seen(self.client_id.bytes)
 
-
     def generate_response(self):
         """
         Creates a response based on the request result.
@@ -818,7 +814,7 @@ class ClientManager:
             if self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value:
                 name = self.db.get_username_by_uuid(self.request.client_id)
                 clients_list = self.db.fetch_all_registered_clients(name)
-                print(clients_list) # todo delete this DEBUG:
+                print(clients_list)  # todo delete this DEBUG:
                 response.client_list_response(clients_list)
             elif self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
                 messages_list = self.db.fetch_messages_to_client(self.request.client_id)
@@ -839,25 +835,34 @@ class ClientManager:
             raise ValueError(f"Response generating error: {e}")
 
     def handle_register_request(self):
+        """
+        Handles the register request logic - inserts the new client to the DB and creates a client ID.
+        """
         if not self.db.does_client_exist(self.username):
             self.client_id = self.db.insert_client(self.request.client_name, self.request.public_key)
         else:
             raise ValueError(f"Username '{self.username}' already exists in the DB.")
 
     def handle_send_message_request(self):
+        """
+        Handles the send message request logic - inserts the message to the DB.
+        """
         try:
             from_client_id = self.request.client_id
             self.target_client_id = self.request.message.target_client_id
             message_type = self.request.message.message_type
             message_content = self.request.message.message_content
 
-            self.message_id = self.db.insert_message(self.target_client_id, from_client_id, message_type, message_content)
+            self.message_id = self.db.insert_message(self.target_client_id, from_client_id, message_type,
+                                                     message_content)
         except Exception as e:
             raise ValueError(f"Error while handling send message request: {e}")
 
 
 class Response:
-    CHUNK_SIZE = 1024
+    """
+    Response class - responsible for sending a response to the client.
+    """
 
     def __init__(self, sock):
         self.socket = sock
@@ -870,25 +875,32 @@ class Response:
         self.message_id = None
 
     def register_response(self, client_id):
+        """
+        Sends a register response to the client.
+        """
         try:
-            self.response_code = ResponseType.CLIENT_REGISTER_REQUEST_SUCCESS.value
+            self.response_code = ResponseType.CLIENT_REGISTER_RESPONSE_SUCCESS.value
             self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value
-            self.response = struct.pack("<BHI 16s", self.version, self.response_code, self.payload_size, client_id.bytes)
+            self.response = struct.pack("<BHI 16s", self.version, self.response_code, self.payload_size,
+                                        client_id.bytes)
 
             self.socket.sendall(self.response)
         except Exception as e:
             raise ValueError(f"Error while sending Register response: {e}")
 
     def client_list_response(self, clients_list):
+        """
+        Sends a client list response to the client.
+        """
         try:
-            self.response_code = ResponseType.CLIENT_LIST_REQUEST_SUCCESS.value
+            self.response_code = ResponseType.CLIENT_LIST_RESPONSE_SUCCESS.value
             self.payload_size = len(clients_list) * (
                     ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.CLIENT_NAME_SIZE.value)
             self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
             self.socket.sendall(self.response)
 
-            for id, name in clients_list:
-                fmt_id = struct.pack("<16s", id)
+            for client_id, name in clients_list:
+                fmt_id = struct.pack("<16s", client_id)
 
                 name = name.encode("ascii")
                 while len(name) < ResponseFieldsSizes.CLIENT_NAME_SIZE.value:
@@ -899,8 +911,11 @@ class Response:
             raise ValueError(f"Error while sending clients list response: {e}")
 
     def public_key_response(self, target_client_id, public_key):
+        """
+        Sends a public key response to the client.
+        """
         try:
-            self.response_code = ResponseType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST_SUCCESS.value
+            self.response_code = ResponseType.PUBLIC_KEY_OF_OTHER_CLIENT_RESPONSE_SUCCESS.value
             self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.PUBLIC_KEY_SIZE.value
             self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
             self.socket.sendall(self.response)
@@ -913,8 +928,11 @@ class Response:
             raise ValueError(f"Error while sending public key response: {e}")
 
     def message_sent_response(self, target_client_id, message_id):
+        """
+        Sends a message sent response to the client.
+        """
         try:
-            self.response_code = ResponseType.SEND_MESSAGE_REQUEST_SUCCESS.value
+            self.response_code = ResponseType.SEND_MESSAGE_RESPONSE_SUCCESS.value
             self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value
             self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
             self.socket.sendall(self.response)
@@ -926,8 +944,11 @@ class Response:
             raise ValueError(f"Error while sending message sent response: {e}")
 
     def fetching_messages_response(self, messages_list):
+        """
+        Sends a list of waiting messages response to the client.
+        """
         try:
-            self.response_code = ResponseType.RECEIVE_INCOMING_MESSAGES_SUCCESS.value
+            self.response_code = ResponseType.RECEIVE_INCOMING_MESSAGES_RESPONSE_SUCCESS.value
 
             # Calculating the payload size
             for client_id, message_id, message_type, content in messages_list:
@@ -974,8 +995,8 @@ class Response:
 
                 # Sending the message content
                 if content is not None:
-                    for i in range(0, len(content), self.CHUNK_SIZE):
-                        chunk = content[i:i + self.CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
+                    for i in range(0, len(content), SOCKET_CHUNK_SIZE):
+                        chunk = content[i:i + SOCKET_CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
                         self.socket.sendall(chunk)  # Send the chunk
                         print("DEBUG: Sending chunk ", chunk.hex())
 
@@ -984,8 +1005,11 @@ class Response:
             raise ValueError(f"Error while sending waiting messages list response: {e}")
 
     def error_response(self):
+        """
+        Sends a general error response to the client.
+        """
         print("Sending Error Response (code 9000)")
-        self.response_code = ResponseType.GENERAL_ERROR.value
+        self.response_code = ResponseType.GENERAL_ERROR_RESPONSE.value
         # Sending the error response
         self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
         self.socket.sendall(self.response)
