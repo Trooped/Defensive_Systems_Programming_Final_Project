@@ -537,6 +537,31 @@ std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArrayPubKey(cons
 	return arr;
 }
 
+// Creates a random file name, between 8 and 32 characters long, with only ASCII characters
+std::string createRandomFileName() {
+	const std::string characters =
+		"abcdefghijklmnopqrstuvwxyz"
+		"ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+		"0123456789";
+
+	std::random_device rd;
+	std::mt19937 gen(rd());
+
+	// Randomize File Name Length (Between 8 and 32 characters)
+	std::uniform_int_distribution<> lengthDist(8, 32);
+	size_t fileNameLength = lengthDist(gen);
+
+	std::uniform_int_distribution<> charDist(0, characters.size() - 1);
+
+	// Randomize File Name Characters - only ASCII
+	std::string randomFileName;
+	for (size_t i = 0; i < fileNameLength; ++i) {
+		randomFileName += characters[charDist(gen)];
+	}
+
+	return randomFileName;
+}
+
 // Validates that a string contains ONLY ascii characters.
 bool containsOnlyASCII(const std::string& name) {
 	for (auto c : name) {
@@ -849,14 +874,15 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				std::vector<uint8_t> message_content = readFixedSize(*socket, message_content_size);
 				payload_size -= message_content_size;
 
-				// Printing the message
+				// Checking if we have the client name in our client list.
 				auto client_opt = handler.getClient(handler.arrayToStringID(client_id));
-
+				// Printing the message
+				std::cout << "From: ";
 				if (client_opt.has_value()) {
-					std::cout << "From: " << client_opt->client_name << std::endl;
+					std::cout << client_opt->client_name << std::endl;
 				}
 				else {
-					std::cerr << "\nWARNING: Client ID not found in the list. Can't print sender name.\nMake sure to ask for an updated clients list.\n";
+					std::cerr << "\nWARNING: Client ID not found in the clients list. Can't print sender name.\nMake sure to ask for an updated clients list!\n";
 				}
 				std::cout << "Content: " << endl;
 
@@ -904,7 +930,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 							std::string decrypted_text = aes.decrypt(message_content_string.c_str(), message_content_string.length());
 
-							std::cout << decrypted_text << endl; // TODO is it enough? maybe divide by lines??
+							std::cout << decrypted_text << endl; 
 						} catch (const CryptoPP::Exception& e) {
 							std::cout << "Can't decrypt message.\n";
 							continue;  // Skip to the next iteration if decryption fails
@@ -920,58 +946,28 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				else if (message_type == ProtocolConstants::Message::SEND_FILE_MESSAGE) {
 					if ((handler.getClient(handler.arrayToStringID(client_id))->symmetric_key).has_value()) {
 						try {
-							// Using the symmetric key to decrypt the file content message.
+							// Using the symmetric key to decrypt the file content.
 							std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(client_id))->symmetric_key.value();
 							AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
-
 							std::string file_content_string(message_content.begin(), message_content.end());
 							std::string decrypted_file_content = aes.decrypt(file_content_string.c_str(), file_content_string.length());
 
-
+							// Finding %TMP% folder, creating a random file name(NO extension, since it wasn't specified) with a random length between 8-32 chars.
+							// Then - creating the full path.
 							std::filesystem::path temp_folder_path = std::filesystem::temp_directory_path();
+							std::string random_file_name = createRandomFileName();
+							std::filesystem::path random_file_path = temp_folder_path / random_file_name;
 
-							std::cout << "DEBUG: temp folder path: " << temp_folder_path << endl;
-							std::cout << "DEBUG: temp folder path to string: " << temp_folder_path.string() << endl;
-							std::cout << "DEBUG: temp folder path to generic string: " << temp_folder_path.generic_string() << endl;
-
-							/*
-							char* tmpDir = nullptr;
-							size_t len = 0;
-
-							if (_dupenv_s(&tmpDir, &len, "TMP") != 0 || tmpDir == nullptr) {
-								std::cerr << "TMP environment variable not found, can't save the file." << std::endl;
-								continue;
-							}
-							*/
-
-							// TODO figure out what to do here, this generates a random file name, and contains the ENTIRE path to the file, so it's useless 
-							// to use the temp_directory_path() function beforehand, i guess.. figure it out.
-
-							// Generate a secure temporary filename using tmpnam_s
-							char tmpFilename[L_tmpnam];
-							if (tmpnam_s(tmpFilename, L_tmpnam) != 0) {
-								std::cerr << "Could not generate temporary filename, can't save the file." << std::endl;
-								//free(tmpDir);
-								continue;
-							}
-
-							std::cout << "DEBUG: temp name: " << tmpFilename << endl;
-
-							//std::string full_path = std::string(tmpDir) + "\\" + std::string(tmpFilename); // Creating the full path for the temp file
-							//free(tmpDir);
-
-							std::string full_path = temp_folder_path.generic_string() + "\\" + std::string(tmpFilename);
-
-							std::cout << "DEBUG: full path: " << full_path << endl;
-
+							std::string full_path = random_file_path.string();
+							// Attempting to create the file and read
 							std::ofstream file(full_path, std::ios::binary);
 							if (!file) {
-								std::cerr << "Could not create temp file." << std::endl;
+								std::cerr << "Received a file, but could not create temp file and save it." << std::endl;
 								continue;
 							}
 							file << decrypted_file_content;
 							file.close();
-							std::cout << "Received file, full path: \n" << full_path << "\n";
+							std::cout << "Received a file, the full path is: \n" << full_path << "\n";
 						}catch (const CryptoPP::Exception& e) {
 							std::cout << "Can't decrypt file content.\n";
 							continue;
@@ -1194,7 +1190,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 		}
 	}
 	else if (operation_code == ProtocolConstants::Input_Codes::SEND_TEXT_MESSAGE_CODE) {
-		if ((handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // If there is a symmetric key with another client
+		if ((handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // If there is a symmetric key with the other client
 			std::string text_input;
 			cout << "Please enter the required text message to send: \n";
 			std::getline(std::cin, text_input);
@@ -1233,10 +1229,13 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 	else if(operation_code == ProtocolConstants::Input_Codes::SEND_FILE){ 
 		if ((handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // If there is a symmetric key with another client
 			std::string file_path;
-			cout << "Please enter the full path to the file you want to send (ASCII only file): \n";
+			cout << "Please enter the full path to the file you want to send (ASCII only path): \n";
 			std::getline(std::cin, file_path);
 
-			// Checking if file exists and if we can open it, throw a "file not found" if not.
+			// Validating the file name and file content.
+			if (!containsOnlyASCII(file_path)) {
+				throw runtime_error("File path contains non-ASCII characters. Cancelling file send operation.");
+			}
 			if (!doesFileExist(file_path)) {
 				throw runtime_error("File not found");
 			}
@@ -1244,17 +1243,15 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 			if (!file.is_open()) {
 				throw std::runtime_error("File not found");
 			}
+			if (file.peek() == std::ifstream::traits_type::eof()) {
+				throw std::runtime_error("File is empty. Cancelling file send operation.");
+			}
 
 			// Copying the entire file into a string
 			std::stringstream buffer;
 			buffer << file.rdbuf();
 			std::string file_content = buffer.str();
 			file.close();
-
-			if (!containsOnlyASCII(file_content)) {
-				cout << "File contains unsupported, non-ascii characters. Cancelling file send request.\n";
-				return;
-			}
 
 			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
 			if (file_content.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {

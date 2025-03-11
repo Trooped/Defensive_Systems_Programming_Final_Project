@@ -53,6 +53,7 @@ The server will do the operation and respond with the following status codes:
 #include <optional>
 #include <unordered_map>
 #include <math.h>
+#include <random>
 
 #include "cryptlib.h"
 #include <osrng.h>
@@ -399,6 +400,9 @@ public:
 
 // Converts public key string to array.
 std::array<uint8_t, ProtocolConstants::PUBLIC_KEY_SIZE> stringToArrayPubKey(const std::string& str);
+
+// Creates a random file name, between 8 and 32 characters long, with only ASCII characters
+std::string createRandomFileName();
 
 // Validates that a string contains ONLY ascii characters.
 bool containsOnlyASCII(const std::string& name);
