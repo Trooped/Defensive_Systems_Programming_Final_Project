@@ -1,33 +1,49 @@
 """
 File: server.py
 Author: Omri Peretz
-Date: January 2025
+Date: March 2025
 Assignment: Maman 15
 Course: Defensive Systems Programming
 
-Description: This file is a client program written in Python, that is a python server that manages text transfers
-between different clients. The client and server communicate over TCP, with a compatible, agreed upon protocol. The
-data is being sent in little endian format. TODO change this <<<<<<<<<
+Description:
+This file is a server program written in Python, that manages text transfers between different clients.
+The client and server communicate over TCP, with a compatible, agreed upon protocol. The data is being sent in little endian format.
+The text & files being sent are encrypted and decrypted using a 16 byte symmetric key (AES - CBC). The symmetric key is encrypted and sent using RSA.
+The symmetric key transferred between clients in the following mechanism:
+0. Client A and Client B register to the server, and create a private and public key.
+1. Client A send a request for the public key of client B
+2. Client A send client B a request for a symmetric key (** if client A doesn't send this request, client B CAN'T send client A a symmetric key).
+3. Client B receives the request
+4. Client B sends a request for the public key of client A
+5. Client B Creates a symmetric key, encrypts it using client A's public key, and requests to send it to client A
+6. Client A receives the symmetric key, decrypts it using his private key
+7. Client A and Client B can communicate freely, with encrypted texts and files using their shared symmetric key
 
-The client can send the following requests: TODO change this <<<<<<<<<
-- 100: Save a file for backup in the server
-- 200: Retrieve a file from the server
-- 201: Delete a file from the server
-- 202: List all files in the user's directory in the server
+The client can send the following requests to the server (number in parentheses is the input code the client needs to enter):
+- 600: Registration request (110)
+- 601: Client list request (120)
+- 602: Public key of other client request (130)
+- 603: Send message request (no specific input)
+- 603 - 1: Receive symmetric key from other client request (151)
+- 603 - 2: Send symmetric key to other client request (152)
+- 603 - 3: Text message send request (150)
+- 603 - 4: File send request (153)
+- 604: waiting messages addressed to the client request (140)
 
-The server will do the operation and respond with the following statuses: TODO change this <<<<<<<<<
-- 201: Success: File retrieved from the server
-- 211: Success: File list created and retrieved from the server
-- 212: Success: File was backed up / deleted
-- 1001: Error: No such file exists in the server for the client
-- 1002: Error: No files exist on the server for this client
-- 1003: Error: General server error
-
+The server will do the operation and respond with the following status codes:
+- 2100: Success: Registration suceeded
+- 2101: Success: List of clients sent
+- 2102: Success: Public key of other client sent to requesting client
+- 2103: Success: Message sent to client (held at server database until client requests to read it)
+- 2104: Success: List of waiting messages sent to client
+- 9000: Error: General server error
 """
+
 # import statements
 import socket
 import selectors
 import struct
+import sys
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -437,6 +453,10 @@ class Message:
             raise ValueError(f"Message too short. No valid {field_name} field received.")
 
         extracted_value = struct.unpack(fmt, relevant_bytes[self.offset:self.offset + size])[0]
+
+        if sys.byteorder == "big":
+            extracted_value = int.from_bytes(extracted_value.to_bytes(size, "little"), byteorder="big")
+
         self.offset += size
         return extracted_value
 
@@ -610,6 +630,10 @@ class Request:
             raise ValueError(f"Request too short. No valid {field_name} field received.")
 
         extracted_value = struct.unpack(fmt, self.request_bytes[self.offset:self.offset + size])[0]
+
+        if sys.byteorder == "big":
+            extracted_value = int.from_bytes(extracted_value.to_bytes(size, "little"), byteorder="big")
+
         self.offset += size
         return extracted_value
 
@@ -814,7 +838,6 @@ class ClientManager:
             if self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value:
                 name = self.db.get_username_by_uuid(self.request.client_id)
                 clients_list = self.db.fetch_all_registered_clients(name)
-                print(clients_list)  # todo delete this DEBUG:
                 response.client_list_response(clients_list)
             elif self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
                 messages_list = self.db.fetch_messages_to_client(self.request.client_id)
@@ -957,22 +980,6 @@ class Response:
                                      ResponseFieldsSizes.MESSAGE_TYPE_SIZE.value + \
                                      ResponseFieldsSizes.MESSAGE_CONTENT_SIZE.value + len(content)
 
-            # TODO DEBUG, REMOvE THIS LATER!!!!!!
-            def hexify(data):
-                """Convert bytes to a hex string for debugging."""
-                return " ".join(f"{b:02X}" for b in data)
-
-            print("DEBUG-------------------------")
-            for client_id, message_id, message_type, content in messages_list:
-                content = content or b""
-                print(f"Client ID: {hexify(client_id)}")
-                print(f"Message ID: {message_id:08X}")  # Print as 8-digit hex
-                print(f"Message Type: {message_type:02X}")  # Print as 2-digit hex
-                print(f"Content size: {len(content)}")  # Print as 2-digit hex
-                print(f"Content\n: {hexify(content)}")
-                print("-" * 40)
-            print("END DEBUG-------------------------")
-
             # Sending the response header
             self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
             self.socket.sendall(self.response)
@@ -988,8 +995,6 @@ class Response:
 
                 header = fmt_id + fmt_message_id + fmt_message_type + fmt_message_content_size
 
-                print("DEBUG Header Sent (Hex):", header.hex())
-
                 # Sending the message header
                 self.socket.sendall(header)
 
@@ -998,7 +1003,6 @@ class Response:
                     for i in range(0, len(content), SOCKET_CHUNK_SIZE):
                         chunk = content[i:i + SOCKET_CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
                         self.socket.sendall(chunk)  # Send the chunk
-                        print("DEBUG: Sending chunk ", chunk.hex())
 
             return True
         except Exception as e:
@@ -1124,11 +1128,9 @@ class Server:
         try:
             while self.running:
                 events = self.sel.select(timeout=None)  # Wait for events
-                print(f"DEBUG: Selector woke up, {len(events)} events")  # 🔴 Debug print
 
                 for key, mask in events:
                     callback = key.data  # The registered function (e.g., _accept_client or _read_client) TODO change this comment
-                    print(f"DEBUG: Calling {callback.__name__} for {key.fileobj}")  # 🔴 Debug print
                     callback(key.fileobj, mask)  # Call the registered function
         except KeyboardInterrupt:
             print("\nServer shutting down (Ctrl+C detected).")

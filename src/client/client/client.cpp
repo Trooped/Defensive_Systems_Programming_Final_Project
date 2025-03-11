@@ -19,7 +19,7 @@ The symmetric key transferred between clients in the following mechanism:
 6. Client A receives the symmetric key, decrypts it using his private key
 7. Client A and Client B can communicate freely, with encrypted texts and files using their shared symmetric key
 
-The client can send the following requests to the server (number in parantheses is the input code the client needs to enter):
+The client can send the following requests to the server (number in parentheses is the input code the client needs to enter):
 - 600: Registration request (110)
 - 601: Client list request (120)
 - 602: Public key of other client request (130)
