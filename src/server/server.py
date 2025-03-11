@@ -312,19 +312,19 @@ class Database:
         finally:
             cursor.close()
 
-    def update_last_seen(self, username: str):
+    def update_last_seen(self, client_id):
         """
         Updates the last_seen field for a given username in the clients table.
         """
         cursor = self.connection.cursor()
         try:
             cursor.execute(
-                f"UPDATE {self.CLIENTS_TABLE_NAME} SET last_seen = ? WHERE name = ?;",
-                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), username)
+                f"UPDATE {self.CLIENTS_TABLE_NAME} SET last_seen = ? WHERE id = ?;",
+                (datetime.now().strftime('%Y-%m-%d %H:%M:%S'), client_id)
             )
             self.connection.commit()
         except Exception as e:
-            print(f"Error updating last_seen for {username}: {e}")
+            print(f"Error updating last_seen for {self.get_username_by_uuid(client_id)}: {e}")
         finally:
             cursor.close()
 
@@ -374,8 +374,6 @@ class Database:
                 if username is not None:
                     messages.append([from_client_id, message_id, message_type, content])
 
-            # Delete the messages after fetching
-            self.delete_messages_to_client(to_client_id)
         except Exception as e:
             print(f"ERROR: Failed to fetch messages for to_client ID '{to_client_id}': {e}")
         finally:
@@ -393,7 +391,7 @@ class Database:
                 f"DELETE FROM {self.MESSAGES_TABLE_NAME} WHERE to_client = ?;", (to_client_id,)
             )
             self.connection.commit()
-            print(f"Deleted all messages for to_client ID '{to_client_id}'.")
+            print(f"Deleted all messages for '{self.get_username_by_uuid(to_client_id)}'.")
         except Exception as e:
             print(f"ERROR: Failed to delete messages for to_client ID '{to_client_id}': {e}")
         finally:
@@ -718,8 +716,10 @@ class ClientManager:
         self.sel = sel
         self.request = None
         self.db = db
-        self.client_id = None  # TODO maybe delete it?
+        self.client_id = None
         self.username = None
+        self.target_client_id = None
+        self.message_id = None
 
     def receive_exact_bytes(self, num_bytes):
         """Reads exactly num_bytes from the socket, making sure all data is received"""
@@ -745,7 +745,7 @@ class ClientManager:
             self.request.message.parse_message_content(message_content_bytes)
 
         except ValueError as e:
-            raise ValueError("Error parsing message from client: ")
+            raise ValueError(f"Error parsing message from client: {e}")
 
     def receive_and_process_request(self):
         """
@@ -769,77 +769,91 @@ class ClientManager:
                 self.request.parse_payload()
 
             return True
-        except socket.error as e:
-            raise
-
-    def handle_request(self, sock, mask):
-        """
-         Receive the request bytes and parse them using receive_and_process_request().
-         Then, handle the request logic, and call the correct response type.
-        """
-        response = Response(self.socket)
-        try:
-            self.receive_and_process_request()
-            print("Finished parsing request")
-
-            request_code = self.request.request_code
-            if request_code == RequestType.CLIENT_LIST_REQUEST.value:
-                self.client_list_request()
-            elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
-                self.incoming_messages_request()
-            elif request_code == RequestType.REGISTER_REQUEST.value:
-                self.register_request()
-            elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
-                self.public_key_other_client_request()
-            elif request_code == RequestType.SEND_MESSAGE_REQUEST.value:
-                self.send_message_request()
         except Exception as e:
-            print(f"Error while handling request: {e}")
-            response.error_response()
-        finally:
-            self.db.update_last_seen(
-                self.username)  # todo maybe it's not here??? maybe it's better in the top of the function????
+            raise ValueError(f"Request parsing error: {e}")
 
-    # TODO add more error handling here???????????
-    def client_list_request(self):
-        response = Response(self.socket)
-        name = self.db.get_username_by_uuid(self.request.client_id)
-        clients_list = self.db.fetch_all_registered_clients(name)
-        print(clients_list)
-        response.client_list_response(clients_list)
+    def process_request(self):
+        """
+            Parses the incoming request and processes it accordingly.
+            """
+        self.receive_and_process_request()
+        print("Finished parsing request")
 
-    def incoming_messages_request(self):
-        messages_list = self.db.fetch_messages_to_client(self.request.client_id)
-        response = Response(self.socket)
-        response.fetching_messages_response(messages_list)
-
-    def register_request(self):
-        response = Response(self.socket)
-
-        if not self.db.does_client_exist(self.username):
-            server_client_id = self.db.insert_client(self.request.client_name, self.request.public_key)
-            response.register_response(server_client_id)
+        request_code = self.request.request_code
+        if request_code in [RequestType.CLIENT_LIST_REQUEST.value, RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value, RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value]:
+            return # There is no request handling logic for the above request, only data gathering, which will be done in the generate_response
+        elif request_code == RequestType.REGISTER_REQUEST.value:
+            self.handle_register_request()
+        elif request_code == RequestType.SEND_MESSAGE_REQUEST.value:
+            self.handle_send_message_request()
         else:
-            response.error_response()
+            raise ValueError(f"Unknown request code: {request_code}")
+
+    def handle_client(self, sock, mask):
+        """
+        Receive the request, process it, generate the response.
+        """
+        try:
+            self.process_request()
+            if self.request.request_code != RequestType.REGISTER_REQUEST.value:
+                self.client_id = self.request.client_id
+            self.generate_response()
+        except Exception as e:
+            print(f"Error while handling client: {e}")
+            Response(self.socket).error_response()
+        finally:
+            if self.request.request_code != RequestType.REGISTER_REQUEST.value:
+                self.db.update_last_seen(self.client_id)
+            else:
+                self.db.update_last_seen(self.client_id.bytes)
+
+
+    def generate_response(self):
+        """
+        Creates a response based on the request result.
+        """
+        try:
+            response = Response(self.socket)
+
+            if self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value:
+                name = self.db.get_username_by_uuid(self.request.client_id)
+                clients_list = self.db.fetch_all_registered_clients(name)
+                print(clients_list) # todo delete this DEBUG:
+                response.client_list_response(clients_list)
+            elif self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
+                messages_list = self.db.fetch_messages_to_client(self.request.client_id)
+                sent = response.fetching_messages_response(messages_list)
+                if sent:
+                    self.db.delete_messages_to_client(self.request.client_id)
+            elif self.request.request_code == RequestType.REGISTER_REQUEST.value:
+                print(self.client_id)
+                response.register_response(self.client_id)
+            elif self.request.request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
+                public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
+                response.public_key_response(self.request.target_client_id, public_key_other_client)
+            elif self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
+                response.message_sent_response(self.target_client_id, self.message_id)
+            else:
+                raise ValueError(f"Unknown request code: {self.request.request_code}")
+        except Exception as e:
+            raise ValueError(f"Response generating error: {e}")
+
+    def handle_register_request(self):
+        if not self.db.does_client_exist(self.username):
+            self.client_id = self.db.insert_client(self.request.client_name, self.request.public_key)
+        else:
             raise ValueError(f"Username '{self.username}' already exists in the DB.")
 
-    def public_key_other_client_request(self):
-        response = Response(self.socket)
-        public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
-        print(
-            f"DEBUG: The public key i'm sending is:\n {public_key_other_client} \n and it's size is: {len(public_key_other_client)}")
-        response.public_key_response(self.request.target_client_id, public_key_other_client)
+    def handle_send_message_request(self):
+        try:
+            from_client_id = self.request.client_id
+            self.target_client_id = self.request.message.target_client_id
+            message_type = self.request.message.message_type
+            message_content = self.request.message.message_content
 
-    def send_message_request(self):
-        from_client_id = self.request.client_id
-        target_client_id = self.request.message.target_client_id
-        message_type = self.request.message.message_type
-        message_content = self.request.message.message_content
-
-        message_id = self.db.insert_message(target_client_id, from_client_id, message_type, message_content)
-
-        response = Response(self.socket)
-        response.message_sent_response(target_client_id, message_id)
+            self.message_id = self.db.insert_message(self.target_client_id, from_client_id, message_type, message_content)
+        except Exception as e:
+            raise ValueError(f"Error while handling send message request: {e}")
 
 
 class Response:
@@ -856,106 +870,121 @@ class Response:
         self.message_id = None
 
     def register_response(self, client_id):
-        self.response_code = ResponseType.CLIENT_REGISTER_REQUEST_SUCCESS.value
-        self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value
-        client_id_bytes = client_id.bytes
-        self.response = struct.pack("<BHI 16s", self.version, self.response_code, self.payload_size, client_id_bytes)
+        try:
+            self.response_code = ResponseType.CLIENT_REGISTER_REQUEST_SUCCESS.value
+            self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value
+            self.response = struct.pack("<BHI 16s", self.version, self.response_code, self.payload_size, client_id.bytes)
 
-        self.socket.sendall(self.response)
+            self.socket.sendall(self.response)
+        except Exception as e:
+            raise ValueError(f"Error while sending Register response: {e}")
 
     def client_list_response(self, clients_list):
-        self.response_code = ResponseType.CLIENT_LIST_REQUEST_SUCCESS.value
-        self.payload_size = len(clients_list) * (
-                ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.CLIENT_NAME_SIZE.value)
-        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
-        self.socket.sendall(self.response)
+        try:
+            self.response_code = ResponseType.CLIENT_LIST_REQUEST_SUCCESS.value
+            self.payload_size = len(clients_list) * (
+                    ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.CLIENT_NAME_SIZE.value)
+            self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+            self.socket.sendall(self.response)
 
-        for id, name in clients_list:
-            fmt_id = struct.pack("<16s", id)
+            for id, name in clients_list:
+                fmt_id = struct.pack("<16s", id)
 
-            name = name.encode("ascii")
-            while len(name) < ResponseFieldsSizes.CLIENT_NAME_SIZE.value:
-                name += b'\x00'
-            fmt_name = struct.pack("<255s", name)
-            self.socket.sendall(fmt_id + fmt_name)
+                name = name.encode("ascii")
+                while len(name) < ResponseFieldsSizes.CLIENT_NAME_SIZE.value:
+                    name += b'\x00'
+                fmt_name = struct.pack("<255s", name)
+                self.socket.sendall(fmt_id + fmt_name)
+        except Exception as e:
+            raise ValueError(f"Error while sending clients list response: {e}")
 
     def public_key_response(self, target_client_id, public_key):
-        self.response_code = ResponseType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST_SUCCESS.value
-        self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.PUBLIC_KEY_SIZE.value
-        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
-        self.socket.sendall(self.response)
+        try:
+            self.response_code = ResponseType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST_SUCCESS.value
+            self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.PUBLIC_KEY_SIZE.value
+            self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+            self.socket.sendall(self.response)
 
-        self.client_id = struct.pack("<16s", target_client_id)
-        self.public_key = struct.pack("<160s", public_key)
-        print(
-            f"DEBUG: The public key i'm sending after packing is:\n {self.public_key} \n and it's size is: {len(self.public_key)}")
+            self.client_id = struct.pack("<16s", target_client_id)
+            self.public_key = struct.pack("<160s", public_key)
 
-        self.socket.sendall(self.client_id + self.public_key)
+            self.socket.sendall(self.client_id + self.public_key)
+        except Exception as e:
+            raise ValueError(f"Error while sending public key response: {e}")
 
     def message_sent_response(self, target_client_id, message_id):
-        self.response_code = ResponseType.SEND_MESSAGE_REQUEST_SUCCESS.value
-        self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value
-        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
-        self.socket.sendall(self.response)
+        try:
+            self.response_code = ResponseType.SEND_MESSAGE_REQUEST_SUCCESS.value
+            self.payload_size = ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value
+            self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+            self.socket.sendall(self.response)
 
-        self.client_id = struct.pack("<16s", target_client_id)
-        self.message_id = struct.pack("<I", message_id)
-        self.socket.sendall(self.client_id + self.message_id)
+            self.client_id = struct.pack("<16s", target_client_id)
+            self.message_id = struct.pack("<I", message_id)
+            self.socket.sendall(self.client_id + self.message_id)
+        except Exception as e:
+            raise ValueError(f"Error while sending message sent response: {e}")
 
     def fetching_messages_response(self, messages_list):
-        self.response_code = ResponseType.RECEIVE_INCOMING_MESSAGES_SUCCESS.value
+        try:
+            self.response_code = ResponseType.RECEIVE_INCOMING_MESSAGES_SUCCESS.value
 
-        # Calculating the payload size
-        for client_id, message_id, message_type, content in messages_list:
-            content = content or b""
-            self.payload_size += ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value + \
-                                 ResponseFieldsSizes.MESSAGE_TYPE_SIZE.value + \
-                                 ResponseFieldsSizes.MESSAGE_CONTENT_SIZE.value + len(content)
+            # Calculating the payload size
+            for client_id, message_id, message_type, content in messages_list:
+                content = content or b""
+                self.payload_size += ResponseFieldsSizes.CLIENT_ID_SIZE.value + ResponseFieldsSizes.MESSAGE_ID_SIZE.value + \
+                                     ResponseFieldsSizes.MESSAGE_TYPE_SIZE.value + \
+                                     ResponseFieldsSizes.MESSAGE_CONTENT_SIZE.value + len(content)
 
-        # TODO DEBUG, REMOvE THIS LATER!!!!!!
-        def hexify(data):
-            """Convert bytes to a hex string for debugging."""
-            return " ".join(f"{b:02X}" for b in data)
+            # TODO DEBUG, REMOvE THIS LATER!!!!!!
+            def hexify(data):
+                """Convert bytes to a hex string for debugging."""
+                return " ".join(f"{b:02X}" for b in data)
 
-        print("DEBUG-------------------------")
-        for client_id, message_id, message_type, content in messages_list:
-            content = content or b""
-            print(f"Client ID: {hexify(client_id)}")
-            print(f"Message ID: {message_id:08X}")  # Print as 8-digit hex
-            print(f"Message Type: {message_type:02X}")  # Print as 2-digit hex
-            print(f"Content size: {len(content)}")  # Print as 2-digit hex
-            print(f"Content\n: {hexify(content)}")
-            print("-" * 40)
-        print("END DEBUG-------------------------")
+            print("DEBUG-------------------------")
+            for client_id, message_id, message_type, content in messages_list:
+                content = content or b""
+                print(f"Client ID: {hexify(client_id)}")
+                print(f"Message ID: {message_id:08X}")  # Print as 8-digit hex
+                print(f"Message Type: {message_type:02X}")  # Print as 2-digit hex
+                print(f"Content size: {len(content)}")  # Print as 2-digit hex
+                print(f"Content\n: {hexify(content)}")
+                print("-" * 40)
+            print("END DEBUG-------------------------")
 
-        # Sending the response header
-        self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
-        self.socket.sendall(self.response)
+            # Sending the response header
+            self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
+            self.socket.sendall(self.response)
 
-        # Sending all the messages in a loop
-        for (client_id, message_id, message_type, content) in messages_list:
-            # Building the message header
-            fmt_id = struct.pack("<16s", client_id)
-            fmt_message_id = struct.pack("<I", message_id)
-            fmt_message_type = struct.pack("<B", message_type)
-            content = content or b""
-            fmt_message_content_size = struct.pack("<I", len(content))
+            # Sending all the messages in a loop
+            for (client_id, message_id, message_type, content) in messages_list:
+                # Building the message header
+                fmt_id = struct.pack("<16s", client_id)
+                fmt_message_id = struct.pack("<I", message_id)
+                fmt_message_type = struct.pack("<B", message_type)
+                content = content or b""
+                fmt_message_content_size = struct.pack("<I", len(content))
 
-            header = fmt_id + fmt_message_id + fmt_message_type + fmt_message_content_size
+                header = fmt_id + fmt_message_id + fmt_message_type + fmt_message_content_size
 
-            print("DEBUG Header Sent (Hex):", header.hex())
+                print("DEBUG Header Sent (Hex):", header.hex())
 
-            # Sending the message header
-            self.socket.sendall(header)
+                # Sending the message header
+                self.socket.sendall(header)
 
-            # Sending the message content
-            if content is not None:
-                for i in range(0, len(content), self.CHUNK_SIZE):
-                    chunk = content[i:i + self.CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
-                    self.socket.sendall(chunk)  # Send the chunk
-                    print("DEBUG: Sending chunk ", chunk.hex())
+                # Sending the message content
+                if content is not None:
+                    for i in range(0, len(content), self.CHUNK_SIZE):
+                        chunk = content[i:i + self.CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
+                        self.socket.sendall(chunk)  # Send the chunk
+                        print("DEBUG: Sending chunk ", chunk.hex())
+
+            return True
+        except Exception as e:
+            raise ValueError(f"Error while sending waiting messages list response: {e}")
 
     def error_response(self):
+        print("Sending Error Response (code 9000)")
         self.response_code = ResponseType.GENERAL_ERROR.value
         # Sending the error response
         self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
@@ -1042,7 +1071,7 @@ class Server:
 
         if client:
             try:
-                success = client.handle_request(sock, mask)
+                success = client.handle_client(sock, mask)
                 if not success:
                     print(f"Client {sock.fileno()} disconnected.")
                     self._remove_client(sock)
