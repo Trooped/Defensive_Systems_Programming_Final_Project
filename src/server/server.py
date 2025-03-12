@@ -50,6 +50,8 @@ from enum import Enum
 import sqlite3
 from typing import Any
 
+import select
+
 # general constants:
 VERSION_NUMBER = 2
 SOCKET_CHUNK_SIZE = 1024
@@ -271,12 +273,8 @@ class Database:
             self.connection.commit()
             return server_client_id
 
-        except ValueError as ve:
-            print(f"Validation error: {ve}")
-            raise
         except Exception as e:
-            print(f"Error inserting new client into DB: {e}")
-            raise
+            raise ValueError(f"Error inserting new client into DB - {e}")
         finally:
             cursor.close()
 
@@ -338,7 +336,7 @@ class Database:
 
         # Check if the user exists
         if result is None:
-            print(f"WARNING: No client found with id '{client_id}'.")
+            print(f"WARNING: No client found with ID '{client_id}'.")
             return None
 
         return result[0]  # Return the username as a string
@@ -614,7 +612,7 @@ class Request:
                 print(
                     f"Operation {request_operation} is successful: File '{filename_received}' was retrieved and saved as 'tmp' in the client.py folder.")
             """
-            print()  # print a new line
+            #print()  # print a new line TODO delete this??????
             return
 
         except struct.error as e:
@@ -774,10 +772,10 @@ class ClientManager:
             self.request = Request(request_bytes)
 
             # Checks if the user is registered before making ANY other request.
-            username = self.db.get_username_by_uuid(self.request.client_id)
-            if self.request.request_code != RequestType.REGISTER_REQUEST.value and (
-                    username is None or not self.db.does_client_exist(username)):
-                raise ValueError("Unregistered user attempts to make a request, cancelling request processing.")
+            if self.request.request_code != RequestType.REGISTER_REQUEST.value:
+                username = self.db.get_username_by_uuid(self.request.client_id)
+                if username is None or not self.db.does_client_exist(username):
+                    raise ValueError("Unregistered user attempts to make a request, cancelling request processing.")
 
             if self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
                 self.process_message_request()
@@ -792,12 +790,33 @@ class ClientManager:
         except Exception as e:
             raise ValueError(f"Request parsing error: {e}")
 
+    def _print_request_type_message(self):
+        request_code = self.request.request_code
+        if self.request.request_code != RequestType.REGISTER_REQUEST.value:
+            client_name = self.db.get_username_by_uuid(self.request.client_id)
+
+        if request_code == RequestType.REGISTER_REQUEST.value:
+            print(f"Handling client request to register with the name '{self.request.client_name}'")
+        elif request_code == RequestType.SEND_MESSAGE_REQUEST.value:
+            print(
+                f"Handling client request from '{client_name}' to send a message to client '{self.db.get_username_by_uuid(self.request.message.target_client_id)}'")
+        elif request_code == RequestType.CLIENT_LIST_REQUEST.value:
+            print(f"Handling client request from '{client_name}' to fetch list of all registered clients")
+        elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
+            print(
+                f"Handling client request from '{client_name}' to fetch public key of client '{self.db.get_username_by_uuid(self.request.target_client_id)}'.")
+        elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
+            print(f"Handling client request from '{client_name} to fetch all incoming messages from the database")
+        else:
+            raise ValueError(f"Unknown request code: {request_code}")
+
     def process_request(self):
         """
         Receives the incoming request and processes it.
         """
+        print("Receiving and processing request from the client...")
         self.receive_and_process_request()
-        print("Finished parsing request")
+        self._print_request_type_message() # Printing the correct request type
 
         request_code = self.request.request_code
         if request_code in [RequestType.CLIENT_LIST_REQUEST.value, RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value,
@@ -815,18 +834,21 @@ class ClientManager:
         Receive the request, process it, generate the response.
         """
         try:
-            self.process_request()
+            self.process_request() # Receiving and processing a request from the client.
+            # If it's not a register request, update the client ID to the one received in the request.
             if self.request.request_code != RequestType.REGISTER_REQUEST.value:
                 self.client_id = self.request.client_id
-            self.generate_response()
-        except Exception as e:
-            print(f"Error while handling client: {e}")
-            Response(self.socket).error_response()
-        finally:
+            print()
+            self.generate_response() # Generating and sending a response to the client.
+            print()
+            # If the client's interaction with the server is successful, update the "last seen" field in the DB.
             if self.request.request_code != RequestType.REGISTER_REQUEST.value:
                 self.db.update_last_seen(self.client_id)
             else:
                 self.db.update_last_seen(self.client_id.bytes)
+        except Exception as e:
+            print(f"Error while handling client: {e}")
+            Response(self.socket).error_response()
 
     def generate_response(self):
         """
@@ -834,23 +856,28 @@ class ClientManager:
         """
         try:
             response = Response(self.socket)
+            if self.request.request_code != RequestType.REGISTER_REQUEST.value:
+                client_name = self.db.get_username_by_uuid(self.request.client_id)
 
+            print("Generating response...")
             if self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value:
-                name = self.db.get_username_by_uuid(self.request.client_id)
-                clients_list = self.db.fetch_all_registered_clients(name)
+                clients_list = self.db.fetch_all_registered_clients(client_name)
+                print(f"Responding with clients list to client '{client_name}'.")
                 response.client_list_response(clients_list)
             elif self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
                 messages_list = self.db.fetch_messages_to_client(self.request.client_id)
+                print(f"Responding with messages destined to client '{client_name}'.")
                 sent = response.fetching_messages_response(messages_list)
                 if sent:
                     self.db.delete_messages_to_client(self.request.client_id)
             elif self.request.request_code == RequestType.REGISTER_REQUEST.value:
-                print(self.client_id)
                 response.register_response(self.client_id)
             elif self.request.request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
                 public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
+                print(f"Responding with public key of client '{self.db.get_username_by_uuid(self.request.target_client_id)}' to client '{client_name}'.")
                 response.public_key_response(self.request.target_client_id, public_key_other_client)
             elif self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
+                print(f"Responding with 'message sent successfully' code")
                 response.message_sent_response(self.target_client_id, self.message_id)
             else:
                 raise ValueError(f"Unknown request code: {self.request.request_code}")
@@ -998,11 +1025,10 @@ class Response:
                 # Sending the message header
                 self.socket.sendall(header)
 
-                # Sending the message content
-                if content is not None:
-                    for i in range(0, len(content), SOCKET_CHUNK_SIZE):
-                        chunk = content[i:i + SOCKET_CHUNK_SIZE]  # Get a chunk of max CHUNK_SIZE
-                        self.socket.sendall(chunk)  # Send the chunk
+                # Send message content in chunks
+                for i in range(0, len(content), SOCKET_CHUNK_SIZE):
+                    chunk = content[i:i + SOCKET_CHUNK_SIZE]
+                    self._send_with_retry(self.socket, chunk)
 
             return True
         except Exception as e:
@@ -1017,6 +1043,22 @@ class Response:
         # Sending the error response
         self.response = struct.pack("<BHI", self.version, self.response_code, self.payload_size)
         self.socket.sendall(self.response)
+
+
+    def _send_with_retry(self, sock, data):
+        """
+        Sends all data over a non-blocking socket, handling cases where not all bytes are sent immediately.
+        """
+        total_sent = 0
+        while total_sent < len(data):
+            try:
+                sent = sock.send(data[total_sent:])  # Attempt to send remaining bytes
+                if sent == 0:
+                    raise RuntimeError("Socket connection broken")
+                total_sent += sent
+            except BlockingIOError:
+                # ✅ If buffer is full, wait until the socket is writable
+                select.select([], [sock], [])  # Wait for socket to be ready before retrying
 
 
 class Server:
@@ -1075,14 +1117,17 @@ class Server:
         self.sock.listen(self.MAX_CONNECTIONS)
         self.sock.setblocking(False)
         self.sel.register(self.sock, selectors.EVENT_READ, self._accept_client)
-        print(f"Server is running on {self.host}:{self.port}")
+        print(f"MessageU server is running on {self.host}:{self.port}")
+        print(f"Waiting for connections...")
 
     def _accept_client(self, sock: socket.socket, mask) -> None:
         """Handles new client connections."""
         try:
             conn, addr = sock.accept()
             conn.setblocking(False)
+            print("-----------------------------")
             print(f"New connection from {addr}")
+            print()
 
             # Create a ClientManager for this connection
             client = ClientManager(conn, self.db, self.sel)
@@ -1101,7 +1146,7 @@ class Server:
             try:
                 success = client.handle_client(sock, mask)
                 if not success:
-                    print(f"Client {sock.fileno()} disconnected.")
+                    print(f"Client {sock.fileno()} disconnected.\n")
                     self._remove_client(sock)
                 else:
                     print(f"Closing connection after response for client {sock.fileno()}")
@@ -1130,8 +1175,8 @@ class Server:
                 events = self.sel.select(timeout=None)  # Wait for events
 
                 for key, mask in events:
-                    callback = key.data  # The registered function (e.g., _accept_client or _read_client) TODO change this comment
-                    callback(key.fileobj, mask)  # Call the registered function
+                    callback = key.data
+                    callback(key.fileobj, mask)  # Call the registered function (_read_client)
         except KeyboardInterrupt:
             print("\nServer shutting down (Ctrl+C detected).")
         except Exception as e:
