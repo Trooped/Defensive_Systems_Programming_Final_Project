@@ -378,7 +378,7 @@ class Database:
                 f"DELETE FROM {self.MESSAGES_TABLE_NAME} WHERE to_client = ?;", (to_client_id,)
             )
             self.connection.commit()
-            print(f"Deleted all messages for '{self.get_username_by_uuid(to_client_id)}'.")
+            print(f"Deleted all messages for client '{self.get_username_by_uuid(to_client_id)}'.")
         except Exception as e:
             print(f"ERROR: Failed to delete messages for to_client ID '{to_client_id}': {e}")
         finally:
@@ -792,23 +792,24 @@ class ClientManager:
 
     def _print_request_type_message(self):
         request_code = self.request.request_code
-        if self.request.request_code != RequestType.REGISTER_REQUEST.value:
-            client_name = self.db.get_username_by_uuid(self.request.client_id)
+
 
         if request_code == RequestType.REGISTER_REQUEST.value:
             print(f"Handling client request to register with the name '{self.request.client_name}'")
-        elif request_code == RequestType.SEND_MESSAGE_REQUEST.value:
-            print(
-                f"Handling client request from '{client_name}' to send a message to client '{self.db.get_username_by_uuid(self.request.message.target_client_id)}'")
-        elif request_code == RequestType.CLIENT_LIST_REQUEST.value:
-            print(f"Handling client request from '{client_name}' to fetch list of all registered clients")
-        elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
-            print(
-                f"Handling client request from '{client_name}' to fetch public key of client '{self.db.get_username_by_uuid(self.request.target_client_id)}'.")
-        elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
-            print(f"Handling client request from '{client_name} to fetch all incoming messages from the database")
-        else:
-            raise ValueError(f"Unknown request code: {request_code}")
+        elif self.request.request_code != RequestType.REGISTER_REQUEST.value:
+            client_name = self.db.get_username_by_uuid(self.request.client_id)
+            if request_code == RequestType.SEND_MESSAGE_REQUEST.value:
+                print(
+                    f"Handling client request from '{client_name}' to send a message to client '{self.db.get_username_by_uuid(self.request.message.target_client_id)}'")
+            elif request_code == RequestType.CLIENT_LIST_REQUEST.value:
+                print(f"Handling client request from '{client_name}' to fetch list of all registered clients")
+            elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
+                print(
+                    f"Handling client request from '{client_name}' to fetch public key of client '{self.db.get_username_by_uuid(self.request.target_client_id)}'.")
+            elif request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
+                print(f"Handling client request from '{client_name} to fetch all incoming messages from the database")
+            else:
+                raise ValueError(f"Unknown request code: {request_code}")
 
     def process_request(self):
         """
@@ -856,31 +857,30 @@ class ClientManager:
         """
         try:
             response = Response(self.socket)
-            if self.request.request_code != RequestType.REGISTER_REQUEST.value:
-                client_name = self.db.get_username_by_uuid(self.request.client_id)
 
-            print("Generating response...")
-            if self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value:
-                clients_list = self.db.fetch_all_registered_clients(client_name)
-                print(f"Responding with clients list to client '{client_name}'.")
-                response.client_list_response(clients_list)
-            elif self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
-                messages_list = self.db.fetch_messages_to_client(self.request.client_id)
-                print(f"Responding with messages destined to client '{client_name}'.")
-                sent = response.fetching_messages_response(messages_list)
-                if sent:
-                    self.db.delete_messages_to_client(self.request.client_id)
-            elif self.request.request_code == RequestType.REGISTER_REQUEST.value:
+            if self.request.request_code == RequestType.REGISTER_REQUEST.value:
                 response.register_response(self.client_id)
-            elif self.request.request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
-                public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
-                print(f"Responding with public key of client '{self.db.get_username_by_uuid(self.request.target_client_id)}' to client '{client_name}'.")
-                response.public_key_response(self.request.target_client_id, public_key_other_client)
-            elif self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
-                print(f"Responding with 'message sent successfully' code")
-                response.message_sent_response(self.target_client_id, self.message_id)
-            else:
-                raise ValueError(f"Unknown request code: {self.request.request_code}")
+            elif self.request.request_code != RequestType.REGISTER_REQUEST.value:
+                client_name = self.db.get_username_by_uuid(self.request.client_id)
+                if self.request.request_code == RequestType.CLIENT_LIST_REQUEST.value:
+                    clients_list = self.db.fetch_all_registered_clients(client_name)
+                    print(f"Responding with clients list to client '{client_name}'.")
+                    response.client_list_response(clients_list)
+                elif self.request.request_code == RequestType.RECEIVE_INCOMING_MESSAGES_REQUEST.value:
+                    messages_list = self.db.fetch_messages_to_client(self.request.client_id)
+                    print(f"Responding with messages destined to client '{client_name}'.")
+                    sent = response.fetching_messages_response(messages_list)
+                    if sent:
+                        self.db.delete_messages_to_client(self.request.client_id)
+                elif self.request.request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:
+                    public_key_other_client = self.db.get_public_key_by_id(self.request.target_client_id)
+                    print(f"Responding with public key of client '{self.db.get_username_by_uuid(self.request.target_client_id)}' to client '{client_name}'.")
+                    response.public_key_response(self.request.target_client_id, public_key_other_client)
+                elif self.request.request_code == RequestType.SEND_MESSAGE_REQUEST.value:
+                    print(f"Responding with 'message sent successfully' code")
+                    response.message_sent_response(self.target_client_id, self.message_id)
+                else:
+                    raise ValueError(f"Unknown request code: {self.request.request_code}")
         except Exception as e:
             raise ValueError(f"Response generating error: {e}")
 
