@@ -45,6 +45,7 @@ using boost::asio::ip::tcp;
 using namespace std;
 
 #include <regex> //TODO delete this.
+#include <unordered_set>
 
 
 //*******************************************************************
@@ -825,6 +826,10 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		boost::endian::little_to_native_inplace(response_code);
 		boost::endian::little_to_native_inplace(payload_size);
 
+		if (payload_size > ProtocolConstants::MAXIMUM_PAYLOAD_SIZE) {
+			throw std::runtime_error("Payload size exceeds limit.");
+		}
+
 		if (response_code == ProtocolConstants::Response::REGISTRATION_SUCCESS) {
 			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE) {
 				throw std::runtime_error("Payload size has different value than what's expected in register response");
@@ -1049,6 +1054,10 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 					else {
 						std::cout << "Can't decrypt file content.\n";
 					}
+				}
+				else {
+					std::cout << "Invalid message type received." << endl;
+					continue;
 				}
 				std::cout << "-----<EOM>-----" << endl;
 				std::cout << "\n" << endl;
