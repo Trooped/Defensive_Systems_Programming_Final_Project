@@ -44,6 +44,8 @@ The server will do the operation and respond with the following status codes:
 using boost::asio::ip::tcp;
 using namespace std;
 
+#include <regex> //TODO delete this.
+
 
 //*******************************************************************
 /* Classes declarations and functions*/
@@ -422,28 +424,6 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> ClientHandler::stringToAr
 	return arr;
 }
 
-// Debugging function to print all clients TODO delete it!!!!!!!!!!!!!!
-void ClientHandler::printClients() const {
-	std::cout << "Clients List:\n";
-	for (const auto& pair : clients) {
-		std::cout << "- Client Name: " << pair.second.client_name << "\n";
-		if (pair.second.public_key.has_value()) {
-			std::cout << "  - Public Key: [SET]\n";
-		}
-		else {
-			std::cout << "  - Public Key: [NOT SET]\n";
-		}
-		if (pair.second.symmetric_key.has_value()) {
-			std::cout << "  - Symmetric Key: [SET]\n";
-		}
-		else {
-			std::cout << "  - Symmetric Key: [NOT SET]\n";
-		}
-	}
-}
-
-
-////////////////////////////////////////////////////////////////////
 
 /* ServerConnectionManager class-
 * Used to gather the required information, validate it, and access it in order to initiate a connection to the server.
@@ -583,18 +563,16 @@ bool containsOnlyASCII(const std::string& name) {
 }
 
 // Validates a client name.
-bool isValidClientName(const std::string& client_name) {
+void validateClientName(const std::string& client_name) {
 	// Ensure name length is within the valid range (1 to 254 characters)
 	if (client_name.empty() || client_name.size() > 254) {
-		std::cout << "Client name must be at least 1 character and up to 254 characters.\n";
-		return false;
+		throw std::runtime_error("Invalid client name: must be at least 1 character and up to 254 characters.");
 	}
 	// Ensure all characters are ASCII
 	if (!containsOnlyASCII(client_name)) {
-		std::cout << "Client name can't contain non-ASCII characters.\n";
-		return false;
+		throw std::runtime_error("Invalid client name: can't contain non-ASCII characters.");
 	}
-	return true;
+	return;
 }
 
 // Converts a 16 byte client id to ASCII representation, where every 2 characters represent an hex value with 8 bits.
@@ -632,6 +610,64 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToUUID_file(const s
 /* File Utility Functions for "me.info" file*/
 //************************************************
 
+// Function to validate the structure and data of me.info file 
+void validateClientInfoFile(const std::string& filename) {
+	try {
+		std::ifstream file(filename);
+		if (!file.is_open()) {
+			throw std::runtime_error("Could not open file: " + filename);
+		}
+
+		std::vector<std::string> lines;
+		std::string line;
+
+		// Read all lines from the file
+		while (std::getline(file, line)) {
+			lines.push_back(line);
+		}
+		file.close();
+
+		// Check structure (expected: at least 3 lines)
+		if (lines.size() < 3) {
+			throw std::runtime_error("File format is incorrect. Expected at least 3 lines.");
+		}
+
+		// Extract fields
+		std::string username = lines[0];
+		std::string client_id = lines[1];
+		std::ostringstream private_key_oss;
+
+		// Combine all remaining lines for private key
+		for (size_t i = 2; i < lines.size(); ++i) {
+			private_key_oss << lines[i];  // Preserve key as single line
+		}
+		std::string private_key = private_key_oss.str();
+
+		// Validate client name in the file
+		validateClientName(username);
+
+		// Validate the client ID in the file.
+		if (client_id.length() != 32) {
+			throw std::runtime_error("Client ID must contain 32 characters, where each 2 characters are a valid 8bit hex value.");
+		}
+		for (char c : client_id) {
+			if (!std::isxdigit(c)) {
+				throw std::runtime_error("Client ID must contain 32 characters, where each 2 characters are a valid 8bit hex value.");
+			}
+		}
+
+		// Validate that the private key is valid base64:
+		std::regex base64_regex("^[A-Za-z0-9+/]+={0,2}$");
+		if (!std::regex_match(private_key, base64_regex)) {
+			throw std::runtime_error("Invalid base64 private key, contains non-base 64 characters.");
+		}
+	}
+	catch (const std::exception& e) {
+		throw std::runtime_error("Validation failed for me.info file (file may have been compromised) \n\t\t-> " + std::string(e.what()));
+	}
+}
+
+
 // Creates a client.info file, and inserts the correct information according to the protocol standards.
 bool CreateClientInfoFile(std::string filename, std::string username, std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> client_id, std::string private_key_base64) {
 	std::ofstream file(filename);
@@ -647,46 +683,59 @@ bool CreateClientInfoFile(std::string filename, std::string username, std::array
 	return true;
 }
 
-// TODO error handling, what if there isn't a client id there? maybe we need to check if it's a valid one?
 // Reads the me.info file and returns the client id from the file.
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> fetchClientIdFromFile() {
-	const std::string filename = ProtocolConstants::CLIENT_FILENAME;
-	if (!doesFileExist(filename)) {
-		throw std::runtime_error("me.info file doesn't exist. Please register to the server.");
+	try {
+		validateClientInfoFile(ProtocolConstants::CLIENT_FILENAME);
+
+		const std::string filename = ProtocolConstants::CLIENT_FILENAME;
+		if (!doesFileExist(filename)) {
+			throw std::runtime_error("me.info file doesn't exist. Please register to the server.");
+		}
+
+		std::ifstream file(filename);
+		if (!file.is_open()) {
+			throw std::runtime_error("Failed to open me.info");
+		}
+
+		std::string name;
+		getline(file, name);
+
+		std::string client_id_str;
+		getline(file, client_id_str);
+
+		file.close();
+		return stringToUUID_file(client_id_str);
 	}
-
-	std::ifstream file(filename);
-	if (!file.is_open()) {
-		throw std::runtime_error("Failed to open me.info");
+	catch (const std::exception& e) {
+		throw std::runtime_error("Failed to fetch client ID \n\t-> " + std::string(e.what()));
 	}
-
-	std::string name;
-	getline(file, name);
-
-	std::string client_id_str;
-	getline(file, client_id_str);
-
-	file.close();
-	return stringToUUID_file(client_id_str);
 }
 
 // Returns the private key from the file (still in base 64)
 std::string fetchPrivateKeyFromFile() {
-	std::ifstream file(ProtocolConstants::CLIENT_FILENAME);
-	if (!file.is_open()) {
-		throw std::runtime_error("Failed to open me.info");
+	try {
+		validateClientInfoFile(ProtocolConstants::CLIENT_FILENAME);
+
+		std::ifstream file(ProtocolConstants::CLIENT_FILENAME);
+		if (!file.is_open()) {
+			throw std::runtime_error("Failed to open me.info");
+		}
+		std::string line;
+		// Read and discard the username line
+		std::getline(file, line);
+		// Read and discard the client ID line
+		std::getline(file, line);
+
+		std::ostringstream oss;
+		oss << file.rdbuf();
+
+		file.close();
+		return oss.str(); // Still in base 64
 	}
-	std::string line;
-	// Read and discard the username line
-	std::getline(file, line);
-	// Read and discard the client ID line
-	std::getline(file, line);
-
-	std::ostringstream oss;
-	oss << file.rdbuf();
-
-	file.close();
-	return oss.str(); // Still in base 64
+	catch (const std::exception& e) {
+		throw std::runtime_error("Failed to fetch private key \n\t-> " + std::string(e.what()));
+	}
 }
 
 //********************************************
@@ -699,9 +748,8 @@ std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClient
 	std::cout << "Please enter client name: ";
 
 	std::getline(std::cin, dest_client_name);
-	if (!isValidClientName(dest_client_name)) {
-		throw runtime_error("Invalid client name.");
-	}
+
+	validateClientName(dest_client_name);
 
 	ClientHandler& handler = ClientHandler::getInstance();
 
@@ -737,7 +785,7 @@ void flushBuffer(boost::asio::streambuf& buffer, std::istream& stream) {
 	// Reset buffer and input stream state
 	buffer.consume(buffer.size());
 	stream.clear();
-	std::cout << "Flushed remaining data from buffer and reset stream state.\n";
+	//std::cout << "Flushed remaining data from buffer and reset stream state.\n"; TODO maybe delete this???
 }
 
 // Checks if a file exists using the filename
@@ -796,7 +844,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 			if (num_of_clients > 0) {
 				std::cout << "Client list request is successful.\n";
-				std::cout << "Printing Client Names (" << num_of_clients << " total): " << endl;
+				std::cout << "\nPrinting Client Names (" << num_of_clients << " total): " << endl;
 
 				for (size_t i = 0; i < num_of_clients; i++) {
 					// Read client ID and convert vector -> array
@@ -816,7 +864,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				}
 			}
 			else { // 0 clients
-				std::cout << "There are no other clients registered to the server.\n";
+				std::cout << "\nThere are no other clients registered to the server.\n";
 			}
 			socket->close();
 			return std::make_unique<ClientsListResponse>(version, response_code, payload_size);
@@ -837,7 +885,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 			handler.setPublicKey(handler.arrayToStringID(client_id), public_key);
 			socket->close();
-			std::cout << "Public key of client \"" << handler.getClient(handler.arrayToStringID(client_id))->client_name << "\" was fetched from the server and saved.\n";
+			std::cout << "\nPublic key of " << handler.getClient(handler.arrayToStringID(client_id))->client_name << " was fetched from the server and saved.\n";
 			return std::make_unique<PublicKeyResponse>(version, response_code, payload_size, client_id, public_key);
 		}
 		else if (response_code == ProtocolConstants::Response::MESSAGE_SENT_SUCCESS) {
@@ -860,7 +908,12 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
 		}
 		else if (response_code == ProtocolConstants::Response::FETCHING_INCOMING_MESSAGES_SUCCESS) {
-			std::cout << "Printing the incoming messages: " << endl;
+			if (payload_size == 0) {
+				std::cout << "There are no messages waiting for you in the server.\n";
+				socket->close();
+				return std::make_unique<WaitingMessagesFetchResponse>(version, response_code, payload_size);
+			}
+			std::cout << "\nYour messages were fetched from the server. Printing the incoming messages: \n" << endl;
 			while (payload_size > 0) {
 				// Read the fixed-size message header
 				std::vector<uint8_t> header_data = readFixedSize(*socket, ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE);
@@ -928,6 +981,10 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 					}
 					catch (const CryptoPP::Exception& e) {
 						std::cerr << "RSA decryption of symmetric key failed: " << e.what() << std::endl;
+						continue;
+					}
+					catch (const std::exception& e) {
+						std::cerr << "Unexpected error: " << e.what() << std::endl;
 						continue;
 					}
 				}
@@ -1002,7 +1059,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		else if (response_code == ProtocolConstants::Response::GENERAL_ERROR)
 		{
 			socket->close();
-			std::cout << "Server responded with an error." << endl;
+			std::cout << "\nServer responded with an error." << endl;
 			return std::make_unique<ErrorResponse>(version, response_code, payload_size);
 		}
 		else {
@@ -1012,7 +1069,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		}
 	}
 	catch(const std::exception& e){
-		std::cerr << "Error while parsing server response: " << e.what() << "\n";
+		std::cerr << "Error handling server response: " << e.what() << "\n";
 	}
 }
 
@@ -1026,10 +1083,8 @@ void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr
 	string username;
 	std::cout << "Please enter your new username (up to 254 valid ASCII characters):" << endl;
 	std::getline(std::cin, username);
-	if (!isValidClientName(username)) {
-		std::cout << "Invalid client name." << endl;
-		return;
-	}
+
+	validateClientName(username);
 
 	// Creating a default client_id, filled with AA hexa bytes.
 	std::array<uint8_t, 16> default_uuid;
@@ -1056,7 +1111,7 @@ void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr
 	// Send the registration request
 	request->sendRequest(socket);
 
-	std::cout << "Sent a register request to the server with the username: " << username << endl;
+	std::cout << "Sending a register request to the server with the username: " << username << endl;
 
 	// Receive a response
 	response = parseResponse(socket);
@@ -1067,7 +1122,7 @@ void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr
 		auto clientID = regResponse->getClientID();
 		CreateClientInfoFile(filename, username, clientID, priv_base64key);
 
-		std::cout << "New client details are saved in me.info file." << endl;
+		std::cout << "Your client details are saved in me.info file.\n\nMake sure to ask for a clients list before making any requests." << endl;
 	}
 }
 
@@ -1077,6 +1132,7 @@ void handleClientsListAndFetchMessagesRequest(int operation_code, std::unique_pt
 	client_id = fetchClientIdFromFile();
 
 	if (operation_code == ProtocolConstants::Input_Codes::CLIENTS_LIST) {
+		std::cout << "Sending a request to fetch the registered clients list from the server...\n";
 		request = make_unique<basicRequest>(
 			client_id,
 			ProtocolConstants::CLIENT_VERSION,
@@ -1085,6 +1141,7 @@ void handleClientsListAndFetchMessagesRequest(int operation_code, std::unique_pt
 		);
 	}
 	else if (operation_code == ProtocolConstants::Input_Codes::FETCH_WAITING_MESSAGES) {
+		std::cout << "Sending a request to fetch your messages from the server...\n";
 		request = make_unique<basicRequest>(
 			client_id,
 			ProtocolConstants::CLIENT_VERSION,
@@ -1108,7 +1165,10 @@ void handlePublicKeyRequest(std::unique_ptr<BaseRequest>& request, std::unique_p
 
 	ClientHandler& handler = ClientHandler::getInstance();
 
+	std::string client_name = handler.getClient(handler.arrayToStringID(dest_client_id))->client_name;
+
 	if (!(handler.getClient(handler.arrayToStringID(dest_client_id))->public_key).has_value()) {
+		std::cout << "Sending a request to fetch " << client_name << "\'s public key from the server...\n";
 		request = make_unique<PublicKeyRequest>(
 			client_id,
 			ProtocolConstants::CLIENT_VERSION,
@@ -1123,7 +1183,7 @@ void handlePublicKeyRequest(std::unique_ptr<BaseRequest>& request, std::unique_p
 		response = parseResponse(socket);
 	}
 	else {
-		std::cout << "You already have the public key of client " << handler.getClient(handler.arrayToStringID(dest_client_id))->client_name << endl;
+		std::cout << "\nYou've already requested for the public key of " << client_name << endl;
 	}
 }
 
@@ -1148,7 +1208,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 			ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY,
 			ProtocolConstants::MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE
 		);
-		std::cout << "Symmetric key request message sent to client \"" << dest_client_name << "\".\n";
+		std::cout << "\nSymmetric key request message sent to " << dest_client_name << ".\n";
 	}
 	else if (operation_code == ProtocolConstants::Input_Codes::SEND_SYMMETRIC_KEY) {
 		if (handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key_requested == true) {
@@ -1181,20 +1241,21 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 						encrypted_symmetric_key.size(),
 						encrypted_symmetric_key
 					);
-					std::cout << "Your shared symmetric key was sent to client \"" << dest_client_name << "\".\n";
+					std::cout << "\nYour shared symmetric key was sent to " << dest_client_name << ".\n";
 				}
 				else {
-					std::cout << "You need the public key of the destination client to send him a symmetric key.\n";
+					std::cout << "\nYou must send a request for " << dest_client_name << "\'s public key before attempting to send them a symmetric key.\n";
 					return;
 				}
 			}
 			else {
-				std::cout << "You already have a shared symmetric key with this client.\n";
+				std::cout << "\nYou already have a shared symmetric key with " << dest_client_name <<".\n";
 				return;
 			}
 		}
 		else {
-			std::cout << "You can't send a symmetric key to \"" << dest_client_name << "\" until they send you a request for a symmetric key.\n";
+			std::cout << "\nYou can't send a symmetric key to \"" << dest_client_name << "\" until they request one from you.\n";
+			std::cout << "However, you can send them a request for a symmetric key.\n";
 			return;
 		}
 	}
@@ -1204,7 +1265,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 			std::cout << "Please enter the required text message to send: \n";
 			std::getline(std::cin, text_input);
 
-			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
+			// Truncate it to fit the correct size that can be represented by 4 bytes = (2^32 bytes - message header size) IF it's bigger than this.
 			if (text_input.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
 				std::cout << "Input is too big to fit (more than 2^32 -1 characters). Truncating it to fit.\n";
 				text_input = text_input.substr(0, ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE);
@@ -1228,10 +1289,10 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				vec_encrypted_text.size(),
 				vec_encrypted_text
 			);
-			std::cout << "Your encrypted text message was sent to client \"" << dest_client_name << "\".\n";
+			std::cout << "\nYour encrypted text message was sent to " << dest_client_name << ".\n";
 		}
 		else {
-			std::cout << "You need a shared symmetric key with " << dest_client_name << " to them send a text message.\n";
+			std::cout << "\nYou need a shared symmetric key with " << dest_client_name << " to send them a text message.\n";
 			return;
 		}
 	}
@@ -1256,13 +1317,13 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				throw std::runtime_error("File is empty. Cancelling file send operation.");
 			}
 
-			// Copying the entire file into a string
+			// Copying the entire file content into a string
 			std::stringstream buffer;
 			buffer << file.rdbuf();
 			std::string file_content = buffer.str();
 			file.close();
 
-			// Truncate it to fit the correct size that can be represented by 4 bytes = 2^32 bytes IF it's bigger than this.
+			// Don't send the file if it's bigger than 4 bytes = (2^32 - message header size) bytes, because a partial file can be corrupted.
 			if (file_content.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
 				std::cout << "File is too big to fit (more than 2^32 -1 characters). Cancelling file send request\n";
 				return;
@@ -1285,10 +1346,10 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				vec_encrypted_file.size(),
 				vec_encrypted_file
 			);
-			std::cout << "Your encrypted file was sent to client \"" << dest_client_name << "\".\n";
+			std::cout << "Your encrypted file was sent to " << dest_client_name << ".\n";
 		}
 		else {
-			std::cout << "You need a shared symmetric key with " << dest_client_name <<" to them send a file.\n";
+			std::cout << "You need a shared symmetric key with " << dest_client_name << " to them send a file.\n";
 			return;
 		}
 	}
@@ -1307,15 +1368,15 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 		std::cout << "\n";
 		if (!doesFileExist(ProtocolConstants::CLIENT_FILENAME) && operation_code != ProtocolConstants::Input_Codes::REGISTER) {
-			std::cout << "You must register to the server before making any other requests.\n";
-			return;
+			std::cout << "You must register to the server before making any requests.\n";
+			return; // Don't let the user make ANY other request then register, if he's not registered.
 		}
-
+		// Don't let the user make any requests if the clients list is empty. Encouraging the user to ask for a clients list.
 		if (handler.numOfClients() == 0 && (operation_code != ProtocolConstants::Input_Codes::REGISTER && operation_code != ProtocolConstants::Input_Codes::CLIENTS_LIST)) {
-			std::cout << "Please ask for clients list before making requests directed to other clients (requests 130 - 153).\n";
+			std::cout << "You must ask for a clients list before making requests concerning other clients (requests 130 - 153).\n";
 			return;
 		}
-
+		// Call the different operations based on the request code.
 		if (operation_code == ProtocolConstants::Input_Codes::REGISTER){
 			handleClientRegister(request, response,serverConnection);
 		}
@@ -1359,16 +1420,16 @@ int main() {
 					std::cout << "\nThanks for using MessageU!" << endl;
 					break;
 				}
-				else {
+				else { // User inputted a number that isn't 0.
 					handleUserInput(responseCode, serverConnection);
 				}
 			}
 			else { //Non numberical input, clear the input stream!
-				std::cout << "Non-numberical input detected. Please enter one of the valid options.\n";
+				std::cout << "Non-numerical input detected. Please enter one of the valid options.\n";
 				cin.clear();
 				cin.ignore(numeric_limits<streamsize>::max(), '\n');
 			}
-			std::cout << "-----------------------------------------------------" << endl;
+			std::cout << "\n-----------------------------------------------------" << endl;
 		}
 	}
 	catch (const std::exception& e) {
