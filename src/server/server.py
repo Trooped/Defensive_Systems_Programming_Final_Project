@@ -409,6 +409,7 @@ class ClientManager:
         """
         Receives the incoming request and processes it.
         """
+        print("--- Processing Client Request ---")
         print("Receiving and processing request from the client...")
         self.receive_and_process_request()
         self._print_request_type_message()  # Printing the correct request type
@@ -435,6 +436,7 @@ class ClientManager:
             if self.request.request_code != RequestType.REGISTER_REQUEST.value:
                 self.client_id = self.request.client_id
             print()
+            print("--- Generating Server Response ---")
             self.generate_response()  # Generating and sending a response to the client.
             print()
             # If the client's interaction with the server is successful, update the "last seen" field in the DB.

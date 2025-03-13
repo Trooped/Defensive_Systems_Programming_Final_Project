@@ -739,32 +739,6 @@ std::string fetchPrivateKeyFromFile() {
 /* Utility Functions*/
 //********************************************
 
-// Function to validate fields based on type
-void validateNumericalField(const std::string& fieldName, uint64_t value, int size) {
-	uint64_t minValue = 0;
-	uint64_t maxValue = 0;
-
-	if (size == ProtocolConstants::VERSION_SIZE || size == ProtocolConstants::MESSAGE_TYPE_SIZE) { // 1 byte
-		minValue = 0;
-		maxValue = 0xFF; // uint8_t range
-	}
-	else if (size == ProtocolConstants::RESPONSE_CODE_SIZE) { // 2 bytes
-		minValue = 0;
-		maxValue = 0xFFFF; // uint16_t range
-	}
-	else if (size == ProtocolConstants::PAYLOAD_FIELD_SIZE || size == ProtocolConstants::MESSAGE_ID_SIZE || size == ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE) { // 4 bytes
-		minValue = 0;
-		maxValue = 0xFFFFFFFF; // uint8_t range
-	}
-
-	if (value < minValue || value > maxValue) {
-		throw std::runtime_error("Invalid value for " + fieldName + ": " + std::to_string(value) +
-			". Expected range: [" + std::to_string(minValue) + ", " + std::to_string(maxValue) + "].");
-	}
-
-}
-
-
 // Asks the user for a client username, and return the client's ID.
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
 	std::string dest_client_name;
@@ -843,15 +817,15 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		std::memcpy(&response_code, header_data.data() + ProtocolConstants::VERSION_SIZE, ProtocolConstants::RESPONSE_CODE_SIZE);
 		std::memcpy(&payload_size, header_data.data() + ProtocolConstants::VERSION_SIZE + ProtocolConstants::RESPONSE_CODE_SIZE, ProtocolConstants::PAYLOAD_FIELD_SIZE);
 
-		// Convert to native endian format if needed
+		// Convert to native endian format (if little endian - doesn't change anything. only if big endian a conversion happens).
 		boost::endian::little_to_native_inplace(response_code);
 		boost::endian::little_to_native_inplace(payload_size);
 
-		// Validating all of the fields' sizes (unsigned integer of different sizes).
-		validateNumericalField("server version", version, ProtocolConstants::VERSION_SIZE);
-		validateNumericalField("response code", response_code, ProtocolConstants::RESPONSE_CODE_SIZE);
-		validateNumericalField("response payload size", payload_size, ProtocolConstants::PAYLOAD_FIELD_SIZE);
+		if (payload_size > ProtocolConstants::MAXIMUM_PAYLOAD_SIZE) {
+			throw std::runtime_error("Payload size exceeds maximum valid size " + std::to_string(ProtocolConstants::MAXIMUM_PAYLOAD_SIZE)+" bytes.");
+		}
 
+		/* Parse and handle the response based on the response code */
 		if (response_code == ProtocolConstants::Response::REGISTRATION_SUCCESS) {
 			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE) {
 				throw std::runtime_error("Payload size has different value than what's expected in register response");
@@ -930,18 +904,17 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			std::memcpy(&message_id, message_id_vec.data(), ProtocolConstants::MESSAGE_ID_SIZE);
 
 			boost::endian::little_to_native_inplace(message_id);
-			validateNumericalField("message ID", message_id, ProtocolConstants::MESSAGE_ID_SIZE);
 
 			socket->close();
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
 		}
 		else if (response_code == ProtocolConstants::Response::FETCHING_INCOMING_MESSAGES_SUCCESS) {
 			if (payload_size == 0) {
-				std::cout << "There are no messages waiting for you in the server.\n";
+				std::cout << "\nThere are no messages waiting for you in the server.\n";
 				socket->close();
 				return std::make_unique<WaitingMessagesFetchResponse>(version, response_code, payload_size);
 			}
-			std::cout << "\nYour messages were fetched from the server. Printing the incoming messages: \n" << endl;
+			std::cout << "\nYour messages were fetched from the server. Printing the incoming messages: " << endl;
 			while (payload_size > 0) {
 				// Read the fixed-size message header
 				std::vector<uint8_t> header_data = readFixedSize(*socket, ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE);
@@ -961,23 +934,9 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				boost::endian::little_to_native_inplace(message_type);
 				boost::endian::little_to_native_inplace(message_content_size);
 
-				// Validating that the message ID and type fields are valid unsigned numbers. If they're not - you can skip to the next message.
-				try {
-					validateNumericalField("message ID", message_id, ProtocolConstants::MESSAGE_ID_SIZE);
-					validateNumericalField("message type", message_type, ProtocolConstants::MESSAGE_TYPE_SIZE);
-				}
-				catch (const std::exception& e) {
-					std::cerr << "error in message field -> " << e.what() << std::endl;
-					std::cerr << "Skipping message." << endl;
-					continue;
-				}
-
 				// Read the message content from the communication
 				std::vector<uint8_t> message_content = readFixedSize(*socket, message_content_size);
 
-				// Validating that the message content size and the actual size read are valid.
-				// If they're not - it's a big error because it can corrupt all other messages in the chain.
-				validateNumericalField("message content size", message_content_size, ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE);
 				// Check that the message content size that was read is the same as expected.
 				if (message_content.size() != message_content_size) {
 					throw std::runtime_error("Mismatch in message content size. Expected " + std::to_string(message_content_size) + " bytes, but received " + std::to_string(message_content.size()) + " bytes.");
@@ -992,14 +951,14 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				if (client_opt.has_value()) {
 					std::cout << client_opt->client_name << std::endl;
 				}
-				else {
+				else { // if we don't have the client in our client list.
 					std::cout << "Unidentified Client" << std::endl;
 				}
 				std::cout << "Content: " << endl;
 				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
 					std::cout << "Request For Symmetric Key" << endl;
 					if (!message_content.empty()) {
-						std::cerr << "Symmetric key request message should be empty. Received "
+						std::cerr << "Warning: Symmetric key request message should be empty. Received "
 							<< message_content.size() << " bytes." << std::endl;
 						message_content.clear(); // Clear the message content vector.
 						continue;  // Skip this message and move to the next one
@@ -1116,7 +1075,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 							std::cout << "Can't decrypt file content.\n";
 							continue;
 						}catch (const std::exception& e) {
-							std::cerr << "Unexpected error during file processing: " << e.what() << std::endl;
+							std::cerr << "Unexpected error during file message processing: " << e.what() << std::endl;
 							continue;
 						}
 					}
@@ -1147,7 +1106,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		}
 	}
 	catch(const std::exception& e){
-		std::cerr << "Error handling server response: " << e.what() << "\n";
+		throw std::runtime_error("Error handling server response -> " + std::string(e.what()));
 	}
 }
 
@@ -1406,7 +1365,8 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 
 			// Don't send the file if it's bigger than 4 bytes = (2^32 - message header size) bytes, because a partial file can be corrupted.
 			if (file_content.size() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
-				std::cout << "File is too big to fit (more than 2^32 -1 characters). Cancelling file send request\n";
+				std::cout << "\nFile is too big to fit (more than 2^32 -1 characters). Cancelling file send request\n";
+				file_content.clear();
 				return;
 			}
 
@@ -1427,10 +1387,10 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 				vec_encrypted_file.size(),
 				vec_encrypted_file
 			);
-			std::cout << "Your encrypted file was sent to " << dest_client_name << ".\n";
+			std::cout << "\nYour encrypted file was sent to " << dest_client_name << ".\n";
 		}
 		else {
-			std::cout << "You need a shared symmetric key with " << dest_client_name << " to them send a file.\n";
+			std::cout << "\nYou need a shared symmetric key with " << dest_client_name << " to them send a file.\n";
 			return;
 		}
 	}
