@@ -392,8 +392,8 @@ class ClientManager:
             client_name = self.db.get_username_by_uuid(self.request.client_id)
             if request_code == RequestType.SEND_MESSAGE_REQUEST.value:
                 print(
-                    f"Handling client request from '{client_name}' to send a message to client \
-                    '{self.db.get_username_by_uuid(self.request.message.target_client_id)}'")
+                    f"Handling client request from '{client_name}' to send a message to client "
+                    f"'{self.db.get_username_by_uuid(self.request.message.target_client_id)}'")
             elif request_code == RequestType.CLIENT_LIST_REQUEST.value:
                 print(f"Handling client request from '{client_name}' to fetch list of all registered clients")
             elif request_code == RequestType.PUBLIC_KEY_OF_OTHER_CLIENT_REQUEST.value:

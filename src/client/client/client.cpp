@@ -44,10 +44,6 @@ The server will do the operation and respond with the following status codes:
 using boost::asio::ip::tcp;
 using namespace std;
 
-#include <regex> //TODO delete this.
-#include <unordered_set>
-
-
 //*******************************************************************
 /* Classes declarations and functions*/
 //*******************************************************************
@@ -743,6 +739,32 @@ std::string fetchPrivateKeyFromFile() {
 /* Utility Functions*/
 //********************************************
 
+// Function to validate fields based on type
+void validateNumericalField(const std::string& fieldName, uint64_t value, int size) {
+	uint64_t minValue = 0;
+	uint64_t maxValue = 0;
+
+	if (size == ProtocolConstants::VERSION_SIZE || size == ProtocolConstants::MESSAGE_TYPE_SIZE) { // 1 byte
+		minValue = 0;
+		maxValue = 0xFF; // uint8_t range
+	}
+	else if (size == ProtocolConstants::RESPONSE_CODE_SIZE) { // 2 bytes
+		minValue = 0;
+		maxValue = 0xFFFF; // uint16_t range
+	}
+	else if (size == ProtocolConstants::PAYLOAD_FIELD_SIZE || size == ProtocolConstants::MESSAGE_ID_SIZE || size == ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE) { // 4 bytes
+		minValue = 0;
+		maxValue = 0xFFFFFFFF; // uint8_t range
+	}
+
+	if (value < minValue || value > maxValue) {
+		throw std::runtime_error("Invalid value for " + fieldName + ": " + std::to_string(value) +
+			". Expected range: [" + std::to_string(minValue) + ", " + std::to_string(maxValue) + "].");
+	}
+
+}
+
+
 // Asks the user for a client username, and return the client's ID.
 std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> inputUsernameAndGetClientID() {
 	std::string dest_client_name;
@@ -786,7 +808,6 @@ void flushBuffer(boost::asio::streambuf& buffer, std::istream& stream) {
 	// Reset buffer and input stream state
 	buffer.consume(buffer.size());
 	stream.clear();
-	//std::cout << "Flushed remaining data from buffer and reset stream state.\n"; TODO maybe delete this???
 }
 
 // Checks if a file exists using the filename
@@ -826,9 +847,10 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 		boost::endian::little_to_native_inplace(response_code);
 		boost::endian::little_to_native_inplace(payload_size);
 
-		if (payload_size > ProtocolConstants::MAXIMUM_PAYLOAD_SIZE) {
-			throw std::runtime_error("Payload size exceeds limit.");
-		}
+		// Validating all of the fields' sizes (unsigned integer of different sizes).
+		validateNumericalField("server version", version, ProtocolConstants::VERSION_SIZE);
+		validateNumericalField("response code", response_code, ProtocolConstants::RESPONSE_CODE_SIZE);
+		validateNumericalField("response payload size", payload_size, ProtocolConstants::PAYLOAD_FIELD_SIZE);
 
 		if (response_code == ProtocolConstants::Response::REGISTRATION_SUCCESS) {
 			if (payload_size != ProtocolConstants::CLIENT_ID_SIZE) {
@@ -908,6 +930,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 			std::memcpy(&message_id, message_id_vec.data(), ProtocolConstants::MESSAGE_ID_SIZE);
 
 			boost::endian::little_to_native_inplace(message_id);
+			validateNumericalField("message ID", message_id, ProtocolConstants::MESSAGE_ID_SIZE);
 
 			socket->close();
 			return std::make_unique<MessageSentResponse>(version, response_code, payload_size, client_id, message_id);
@@ -938,9 +961,29 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				boost::endian::little_to_native_inplace(message_type);
 				boost::endian::little_to_native_inplace(message_content_size);
 
+				// Validating that the message ID and type fields are valid unsigned numbers. If they're not - you can skip to the next message.
+				try {
+					validateNumericalField("message ID", message_id, ProtocolConstants::MESSAGE_ID_SIZE);
+					validateNumericalField("message type", message_type, ProtocolConstants::MESSAGE_TYPE_SIZE);
+				}
+				catch (const std::exception& e) {
+					std::cerr << "error in message field -> " << e.what() << std::endl;
+					std::cerr << "Skipping message." << endl;
+					continue;
+				}
+
 				// Read the message content from the communication
 				std::vector<uint8_t> message_content = readFixedSize(*socket, message_content_size);
-				payload_size -= message_content_size;
+
+				// Validating that the message content size and the actual size read are valid.
+				// If they're not - it's a big error because it can corrupt all other messages in the chain.
+				validateNumericalField("message content size", message_content_size, ProtocolConstants::MESSAGE_CONTENT_FIELD_SIZE);
+				// Check that the message content size that was read is the same as expected.
+				if (message_content.size() != message_content_size) {
+					throw std::runtime_error("Mismatch in message content size. Expected " + std::to_string(message_content_size) + " bytes, but received " + std::to_string(message_content.size()) + " bytes.");
+				}
+
+				payload_size -= message_content_size; // Subtracting message content size from payload size to keep track of the remaining payload.
 
 				// Checking if we have the client name in our client list.
 				auto client_opt = handler.getClient(handler.arrayToStringID(client_id));
@@ -950,14 +993,29 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 					std::cout << client_opt->client_name << std::endl;
 				}
 				else {
-					std::cerr << "\nWARNING: Client ID not found in the clients list. Can't print sender name.\nMake sure to ask for an updated clients list!\n";
+					std::cout << "Unidentified Client" << std::endl;
 				}
 				std::cout << "Content: " << endl;
-
 				if (message_type == ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY) {
 					std::cout << "Request For Symmetric Key" << endl;
+					if (!message_content.empty()) {
+						std::cerr << "Symmetric key request message should be empty. Received "
+							<< message_content.size() << " bytes." << std::endl;
+						message_content.clear(); // Clear the message content vector.
+						continue;  // Skip this message and move to the next one
+					}
 					if (client_opt.has_value()) { // If the client ID is in the clients list, set his "symmetric_key_requested" to true.
-						handler.setSymmetricKeyRequestedToTrue(handler.arrayToStringID(client_id));
+						// Check if the request was already made
+						if (client_opt->symmetric_key_requested == true) {
+							continue;
+						}
+						else {
+							handler.setSymmetricKeyRequestedToTrue(handler.arrayToStringID(client_id));
+						}
+					}
+					else {
+						std::cerr << "Received a symmetric key request from an unknown client. Please ask for an updated clients list!" << std::endl;
+						continue;  // Skip this message and continue processing
 					}
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_SYMMETRICAL_KEY) {
@@ -968,6 +1026,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 						if (encryptedSymmetricKey.size() != message_content_size) {
 							std::cerr << "ERROR: Encrypted key size mismatch! Expected "<< message_content_size << " bytes, got " << encryptedSymmetricKey.size() << std::endl;
+							raise;
 						}
 
 						// Gathering the decoded private key and creating a decryptor.
@@ -989,20 +1048,24 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 						continue;
 					}
 					catch (const std::exception& e) {
-						std::cerr << "Unexpected error: " << e.what() << std::endl;
+						std::cerr << "Unexpected error during symmetric key response parsing: " << e.what() << std::endl;
 						continue;
 					}
 				}
 				else if (message_type == ProtocolConstants::Message::SEND_TEXT_MESSAGE) {
 					if ((handler.getClient(handler.arrayToStringID(client_id))->symmetric_key).has_value()) {
 						try {
+							// Skipping this message if it's too large.
+							if (message_content.size() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
+								message_content.clear();
+								throw std::runtime_error("Text received is too large for the protocol. Expected at most " + std::to_string(ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) + " bytes, but received " + std::to_string(message_content.size()) + " bytes.");
+							}
+
 							// Using the symmetric key to decrypt the text message.
 							std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(client_id))->symmetric_key.value();
 
 							AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
-
 							std::string message_content_string(message_content.begin(), message_content.end());
-
 							std::string decrypted_text = aes.decrypt(message_content_string.c_str(), message_content_string.length());
 
 							std::cout << decrypted_text << endl; 
@@ -1010,7 +1073,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 							std::cout << "Can't decrypt message.\n";
 							continue;  // Skip to the next iteration if decryption fails
 						} catch (const std::exception& e) {
-							std::cerr << "Unexpected error: " << e.what() << std::endl;
+							std::cerr << "Unexpected error during text message processing: " << e.what() << std::endl;
 							continue;
 						}
 					}
@@ -1021,6 +1084,12 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				else if (message_type == ProtocolConstants::Message::SEND_FILE_MESSAGE) {
 					if ((handler.getClient(handler.arrayToStringID(client_id))->symmetric_key).has_value()) {
 						try {
+							// Skipping this file if it's too large.
+							if (message_content.size() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
+								message_content.clear();
+								throw std::runtime_error("File received is too large for the protocol. Expected at most " + std::to_string(ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) + " bytes, but received " + std::to_string(message_content.size()) + " bytes.");
+							}
+
 							// Using the symmetric key to decrypt the file content.
 							std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(client_id))->symmetric_key.value();
 							AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
@@ -1047,7 +1116,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 							std::cout << "Can't decrypt file content.\n";
 							continue;
 						}catch (const std::exception& e) {
-							std::cerr << "Unexpected error: " << e.what() << std::endl;
+							std::cerr << "Unexpected error during file processing: " << e.what() << std::endl;
 							continue;
 						}
 					}
@@ -1318,22 +1387,25 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 			if (!doesFileExist(file_path)) {
 				throw runtime_error("File not found");
 			}
-			std::ifstream file(file_path, std::ios::binary);
+			std::ifstream file(file_path, std::ios::binary | std::ios::ate); // Open at end to get size
 			if (!file.is_open()) {
-				throw std::runtime_error("File not found");
-			}
-			if (file.peek() == std::ifstream::traits_type::eof()) {
-				throw std::runtime_error("File is empty. Cancelling file send operation.");
+				throw std::runtime_error("Failed to open file.");
 			}
 
-			// Copying the entire file content into a string
-			std::stringstream buffer;
-			buffer << file.rdbuf();
-			std::string file_content = buffer.str();
+			// Get file size
+			size_t file_size = file.tellg();
+			if (file_size == 0) {
+				throw std::runtime_error("File is empty. Cancelling file send operation.");
+			}
+			file.seekg(0, std::ios::beg); // Move back to start of file
+
+			// Allocate memory and read entire file
+			std::vector<uint8_t> file_content(file_size);
+			file.read(reinterpret_cast<char*>(file_content.data()), file_size);
 			file.close();
 
 			// Don't send the file if it's bigger than 4 bytes = (2^32 - message header size) bytes, because a partial file can be corrupted.
-			if (file_content.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
+			if (file_content.size() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
 				std::cout << "File is too big to fit (more than 2^32 -1 characters). Cancelling file send request\n";
 				return;
 			}
@@ -1341,7 +1413,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 			// Using the symmetric key to encrypt the text message.
 			std::array<uint8_t, ProtocolConstants::SYMMETRIC_KEY_SIZE> symmetric_key_arr = handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key.value();
 			AESWrapper aes(symmetric_key_arr.data(), ProtocolConstants::SYMMETRIC_KEY_SIZE);
-			std::string ciphertext = aes.encrypt(file_content.c_str(), file_content.length());
+			std::string ciphertext = aes.encrypt(reinterpret_cast<char*>(file_content.data()), file_size);
 
 			std::vector<uint8_t> vec_encrypted_file(ciphertext.begin(), ciphertext.end());
 
