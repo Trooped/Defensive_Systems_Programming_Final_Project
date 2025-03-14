@@ -1,12 +1,12 @@
 # MessageU - Encrypted Message Transmission System
 # 📃Table of Contents📃
 - [Introduction](#introduction)
-- [Server](#server-python-)
-- [Client](#client-c++-)
-- [Defensive Checks & Error Handling](#defensive-checks---error-handling)
+- [Server](#server-python)
+- [Client](#client-c)
+- [Defensive Checks & Error Handling](#defensive-checks--error-handling)
 - [Communication Protocol](#communication-protocol)
 - [Encryption](#encryption)
-- [Author](#Author)
+- [Author](#author)
 # Introduction
 ## This project was developed in C++ and Python, as a final project for the "Defensive Systems Programming - 20937" 2025A course, part of the Computer Science degree at the Open University of Israel.
  This project implements a secure encrypted message transmission system with a client-server architecture. Messages are encrypted before transmission to protect sensitive data from interception.
@@ -169,4 +169,4 @@
  - Symmetric keys are 16 bytes in the protocol, and are transferred from client A to client B after encrypting them with the public key of client B.
 
 # Author
-Omri Peretz
+Omri Peretz, student at the Open University of Israel
