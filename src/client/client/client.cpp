@@ -1304,7 +1304,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 
 			// Truncate it to fit the correct size that can be represented by 4 bytes = (2^32 bytes - message header size) IF it's bigger than this.
 			if (text_input.length() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
-				std::cout << "Input is too big to fit (more than 2^32 -1 characters). Truncating it to fit.\n";
+				std::cout << "Input is too big to fit (more than 2^32 - 1  characters). Truncating it to fit.\n";
 				text_input = text_input.substr(0, ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE);
 			}
 
@@ -1365,7 +1365,7 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 
 			// Don't send the file if it's bigger than 4 bytes = (2^32 - message header size) bytes, because a partial file can be corrupted.
 			if (file_content.size() > ProtocolConstants::MAXIMUM_TEXT_AND_FILE_SIZE) {
-				std::cout << "\nFile is too big to fit (more than 2^32 -1 characters). Cancelling file send request\n";
+				std::cout << "\nFile is too big to fit (more than 2^32 -1 - 21 {message header} bytes). Cancelling file send request\n";
 				file_content.clear();
 				return;
 			}
@@ -1440,7 +1440,7 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 		}
 	}
 	catch (const std::exception& e) {
-		std::cerr << "Error while handling request: " << e.what() << "\n";
+		std::cerr << "\nError while handling client request: " << e.what() << "\n";
 	}
 	return;
 }

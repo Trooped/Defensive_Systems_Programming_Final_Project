@@ -54,6 +54,8 @@ The server will do the operation and respond with the following status codes:
 #include <unordered_map>
 #include <math.h>
 #include <random>
+#include <regex> 
+#include <unordered_set>
 
 #include "cryptlib.h"
 #include <osrng.h>
@@ -367,8 +369,6 @@ public:
     std::string arrayToStringID(const std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& arr);
     std::array<uint8_t, ProtocolConstants::CLIENT_ID_SIZE> stringToArrayID(const std::string& str);
 
-    // Print All Clients (Debugging) TODO delete it!!!!!!!!!!!!!!!!!!!!!!
-    void printClients() const;
 };
 
 /* ServerConnectionManager class- 
@@ -414,7 +414,7 @@ std::string createRandomFileName();
 bool containsOnlyASCII(const std::string& name);
 
 // Validates a client name.
-bool isValidClientName(const std::string& client_name);
+void validateClientName(const std::string& client_name);
 
 // Converts a 16 byte client id to ASCII representation, where every 2 characters represent an hex value with 8 bits.
 std::string uuidToString_file(const std::array < uint8_t, ProtocolConstants::CLIENT_ID_SIZE>& client_id);
