@@ -55,8 +55,14 @@
   - Crypto++ version 8.80 and earlier
   - Boost version 1.87
   - Compiling on Windows with Visual Studio Community 2022 (or 2019)
+## Compiling and Running the Client:
+ 1. Create a Visual Studio project (recommended) or use a CMake-based workflow.
+ 2. Install the required libraries above, and add them to the project.
+ 3. Add the .cpp, .hpp and server.info file to the project directory.
+ 4. Build in Debug mode - x86 / win32 configuration. (REQUIRED!)
+ 5. Run it / launch the .exe file.
 ## Client Files
-### 1. client.cpp functions:
+### 1a. client.cpp (functions):
   - main() function - initializes a serverConnection instance, and then runs an infinite loop that asks the user for input (different requests for the server or exiting). It enforces numerical user input, and then calls handleUserInput function.
   - handleUserInput() function - takes the input operation code as a parameter, and calls the different handle request function (there's one for each type of request). The user will not be able to call any request other then to register if he's not registered, and will not be able to call any request after registering if there are 0 clients on memory (and he will need to call the clients list request first). It also rejects any unknown user input code (and restarts the loop).
   - handleClientRegister() function - Checks if there's a me.info file already. If there is, cancel operation. if there's not - ask the user for a username input, validate it, create a private and public key, send a register request to the server, and if the response is successful -> calling CreateClientInfoFile() which creates the new me.info file for this client/
@@ -80,26 +86,21 @@
    - Error response - If there is ANY problem with the server logic, it sends back an error response, to let the user know there was some error.
   - Many other functions () - Throughout the file, there are MANY other utility functions, for the me.info file creation, validation, and fetching data from there. For string/text validation, conversion of client ID to the required format for the me.info file and vice versa, creating a random file name, etc...
   - Wrapper functions for the cryptoPP library, provided by the course staff.
-### 2. Client.cpp Classes:
+### 1b. Client.cpp (classes):
  - BaseRequest class - contains the request attributes, and has MANY inheriting classes (including message classes) that are all responsible for creating a request with the correct attributes, and sending it to the server (there's a different send() function for each request class).
  - BaseResponse class - contains the response attributes, with many inheriting classes. Responsible for organizing the responses after they're fetched and parsed.
  - ClientInfo struct - Contains a client name, public key, symmetric key and a boolean symmetric_key_requested field, for use with the ClientHandler Singleton class.
  - ClientHandler Singleton Class - Has ONE instance used throughout the program, and contains an unordered map of {client ID : ClientInfo struct}. It holds all of the relevant clients' data on memory in during runtime. It contains many functions to add client, get the singleton instance, set the attributes, get the number of clients, and fetch a specific client etc.
  - ServerConnectionManager class - contains ip, port, io_context and a socket shared_ptr. The constructor reads the server.info file and validates it, and grabs the ip and port. Then, there's a connectToServer() function which of course - creates a socket with the server and returns it.
  - Wrapper classes for the cryptoPP library, provided by the course staff.
-### 3. Client.hpp:
+### 2. Client.hpp:
  - Contains many constants (inside ProtocolConstants namespace) and includes in the top of the file.
  - Contains all of the function and class declarations
-### 4. server.info:
+### 3. server.info:
  - Contains the IP and PORT of the server, in the current format: 127.0.0.1:1234 . MUST be included in the project directory.
-### 5. me.info:
+### 4. me.info:
  - Contains the client name in the first row, the client ID hexadecimal form (32 hex chars) in second row, and in 3rd row onwards - the base64-encoded private key of the client.
-## Compiling and Running the Client:
- 1. Create a Visual Studio project (recommended) or use a CMake-based workflow.
- 2. Install the required libraries above, and add them to the project.
- 3. Add the .cpp, .hpp and server.info file to the project directory.
- 4. Build in Debug mode - x86 / win32 configuration. (REQUIRED!)
- 5. Run it / launch the .exe file.
+ - Created only after the user registers with the client program to the server.
 ## Client Menu Loop and Operation:
 ### Below is a brief summary of each input code option:
 #### 1. (110) Register
