@@ -22,6 +22,14 @@
 ## Server Requirements
  - Python 3.12 and above is required
  - No third-party libraries beyond Python’s standard library (e.g., socket, struct, selector).
+## Running The Server
+ 1. Optional: Create a virtual environment (recommended, but not required).
+    - python3 -m venv venv
+    - source venv/bin/activate  (Linux/Mac)
+    - .\venv\Scripts\activate   (Windows)
+ 2. Place the myport.info file, which only contains a valid port number in the same folder as server.py
+ 3. Start the server
+ 4. The server will begin listening on the port read from myport.info, and it's assigned IP address (defined in the code) for new connections
 ## Server Files
 ### 1. server.py - contains:
   - main() function - calls the __init__ of a Server class, and then runs it.
@@ -33,14 +41,6 @@
   - Database class - Created on the first run of the server, and holds 2 tables - Clients and Messages. The clients table holds all of the registered clients and their required information. The messages table holds the messages sent between clients, and they're deleted once they've been sent to the other client.
 ### 2. myport.info:
   - Contains the port number for use in the Server class initialization. If invalid / doesn't exist - the server will default to port 1357.
-## Running The Server
- 1. Optional: Create a virtual environment (recommended, but not required).
-    - python3 -m venv venv
-    - source venv/bin/activate  (Linux/Mac)
-    - .\venv\Scripts\activate   (Windows)
- 2. Place the myport.info file, which only contains a valid port number in the same folder as server.py
- 3. Start the server
- 4. The server will begin listening on the port read from myport.info, and it's assigned IP address (defined in the code) for new connections
 
 # Client (C++)
 ## General Information
