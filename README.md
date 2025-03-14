@@ -13,6 +13,7 @@
  - Client: Written in C++, sends requests to the server. Some of the requests are messages to another client.
  - Server: Written in Python, receives requests from the client, processes them, and forwards messages to another client when requested.
  - End-to-End Encryption: Ensures that only authorized recipients can decrypt messages (text messages or files).
+ - Make sure to visit Server and Client's Running / Compiling subsection for a detailed explanation on compilation and running settings.
 # Server (Python)
 ## General Information
  - The server is a stateless server. Each request is handled individually, with no request relying on data from an earlier session data between requests.
@@ -169,4 +170,4 @@
  - Symmetric keys are 16 bytes in the protocol, and are transferred from client A to client B after encrypting them with the public key of client B.
 
 # Author
-Omri Peretz, student at the Open University of Israel
+Omri Peretz
