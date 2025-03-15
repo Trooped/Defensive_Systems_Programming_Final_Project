@@ -46,6 +46,7 @@ The server will do the operation and respond with the following status codes:
 import socket
 import selectors
 import struct
+import sys
 import uuid
 from datetime import datetime
 from enum import Enum
@@ -209,19 +210,24 @@ class Server:
             print(f"WARNING: Failed to read port file '{self.PORT_FILE_NAME}': {e}")
 
         # Fallback to the default port
-        print(f"Returning default port number: {self.DEFAULT_PORT_NUMBER}")
+        print(f"Using default port number: {self.DEFAULT_PORT_NUMBER}")
         return self.DEFAULT_PORT_NUMBER
 
     def _create_socket(self) -> None:
         """Creates the main server socket and registers it with the selector."""
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        self.sock.bind((self.host, self.port))
-        self.sock.listen(self.MAX_CONNECTIONS)
-        self.sock.setblocking(False)
-        self.sel.register(self.sock, selectors.EVENT_READ, self._accept_client)
-        print(f"MessageU server is running on {self.host}:{self.port}")
-        print(f"Waiting for connections...")
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            self.sock.bind((self.host, self.port))
+            self.sock.listen(self.MAX_CONNECTIONS)
+            self.sock.setblocking(False)
+            self.sel.register(self.sock, selectors.EVENT_READ, self._accept_client)
+            print(f"MessageU server is running on {self.host}:{self.port}")
+            print(f"Waiting for connections...")
+        except Exception as e:
+            print(f"FATAL ERROR: Failed to create server socket: {e}")
+            self.stop()
+            sys.exit(1)  # Exit the program cleanly
 
     def _accept_client(self, sock: socket.socket, mask) -> None:
         """Handles new client connections."""
@@ -283,34 +289,43 @@ class Server:
         except KeyboardInterrupt:
             print("\nServer shutting down (Ctrl+C detected).")
         except Exception as e:
-            print(f"ERROR: Unexpected error in server loop: {e}")
+            print(f"FATAL ERROR: Server crashed with error: {e}")
         finally:
             self.stop()
+            sys.exit(1)
 
     def stop(self) -> None:
         """Stops the server, closing all connections and the main socket."""
         print("Stopping the server...")
         self.running = False
 
-        # Close all client connections
-        for fileno, client in list(self.clients.items()):
-            print(f"Closing client {fileno}...")
-            client.socket.close()
-            self.sel.unregister(client.socket)
+        try:
+            # Close all client connections
+            for fileno, client in list(self.clients.items()):
+                print(f"Closing client {fileno}...")
+                try:
+                    client.socket.close()
+                    self.sel.unregister(client.socket)
+                except Exception as e:
+                    print(f"WARNING: Failed to close client {fileno}: {e}")
 
-        self.clients.clear()  # Clear client dictionary
+            self.clients.clear()  # Clear client dictionary
 
-        # Unregister and close the main server socket safely
-        if self.sock:
-            try:
-                self.sel.unregister(self.sock)
-            except KeyError:
-                pass  # Socket might already be unregistered
+            # Unregister and close the main server socket safely
+            if self.sock:
+                try:
+                    self.sel.unregister(self.sock)
+                except KeyError:
+                    pass  # Socket might already be unregistered
 
-            self.sock.close()
+                self.sock.close()
 
-        self.sel.close()
+            self.sel.close()
+        except Exception as e:
+            print(f"FATAL ERROR: Server cleanup failed: {e}")
+
         print("Server shut down successfully.")
+        sys.exit(1)
 
 
 class ClientManager:
@@ -520,7 +535,6 @@ class Request:
         self.request_code = None
         self.offset = 0
         self.payload_size = None
-
         self.parse_request_header()  # Initializing all of the above fields.
 
         """different payload fields, depending on the request (601 and 604 are empty):"""
