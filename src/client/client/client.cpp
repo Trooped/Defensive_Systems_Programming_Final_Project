@@ -914,7 +914,8 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 				socket->close();
 				return std::make_unique<WaitingMessagesFetchResponse>(version, response_code, payload_size);
 			}
-			std::cout << "\nYour messages were fetched from the server. Printing the incoming messages: " << endl;
+			std::cout << "\nYour messages were fetched from the server. Printing the incoming messages: \n" << endl;
+			std::cout << "-----------------------------------------------------" << std::endl;
 			while (payload_size > 0) {
 				// Read the fixed-size message header
 				std::vector<uint8_t> header_data = readFixedSize(*socket, ProtocolConstants::MESSAGE_RESPONSE_HEADER_SIZE);
@@ -939,7 +940,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 
 				// Check that the message content size that was read is the same as expected.
 				if (message_content.size() != message_content_size) {
-					throw std::runtime_error("Mismatch in message content size. Expected " + std::to_string(message_content_size) + " bytes, but received " + std::to_string(message_content.size()) + " bytes.");
+					throw std::runtime_error("Mismatch in message content size. Expected " + std::to_string(message_content_size) + " bytes, but received " + std::to_string(message_content.size()) + " bytes. Stopping receive messages operation.");
 				}
 
 				payload_size -= message_content_size; // Subtracting message content size from payload size to keep track of the remaining payload.
@@ -1088,7 +1089,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 					continue;
 				}
 				std::cout << "-----<EOM>-----" << endl;
-				std::cout << "\n" << endl;
+				std::cout << "\n";
 			}
 			socket->close();
 			return std::make_unique<WaitingMessagesFetchResponse>(version, response_code, payload_size);
@@ -1155,7 +1156,7 @@ void handleClientRegister(std::unique_ptr<BaseRequest>& request, std::unique_ptr
 
 	// Getting the client_id from the RegisterResponse class
 	if (auto* regResponse = dynamic_cast<RegisterResponse*>(response.get())) {
-		std::cout << "Register operation is successful.\n";
+		std::cout << "\nRegister operation is successful.\n";
 		auto clientID = regResponse->getClientID();
 		CreateClientInfoFile(filename, username, clientID, priv_base64key);
 
@@ -1220,7 +1221,7 @@ void handlePublicKeyRequest(std::unique_ptr<BaseRequest>& request, std::unique_p
 		response = parseResponse(socket);
 	}
 	else {
-		std::cout << "\nYou've already requested for the public key of " << client_name << endl;
+		std::cout << "\nYou've already received the public key of " << client_name << "." << endl;
 	}
 }
 
@@ -1236,22 +1237,28 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 	std::string dest_client_name = handler.getClient(handler.arrayToStringID(dest_client_id))->client_name;
 
 	if (operation_code == ProtocolConstants::Input_Codes::REQUEST_SYMMETRIC_KEY) {
-		request = make_unique<symmetricKeyRequestMessage>(
-			client_id,
-			ProtocolConstants::CLIENT_VERSION,
-			ProtocolConstants::Request::SEND_MESSAGE,
-			ProtocolConstants::MESSAGE_REQUEST_HEADER_SIZE,
-			dest_client_id,
-			ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY,
-			ProtocolConstants::MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE
-		);
-		std::cout << "\nSymmetric key request message sent to " << dest_client_name << ".\n";
+		if (!(handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) {
+			request = make_unique<symmetricKeyRequestMessage>(
+				client_id,
+				ProtocolConstants::CLIENT_VERSION,
+				ProtocolConstants::Request::SEND_MESSAGE,
+				ProtocolConstants::MESSAGE_REQUEST_HEADER_SIZE,
+				dest_client_id,
+				ProtocolConstants::Message::REQUEST_SYMMETRICAL_KEY,
+				ProtocolConstants::MESSAGE_REQUEST_SYMMETRICAL_KEY_SIZE
+			);
+			std::cout << "\nSymmetric key request message sent to " << dest_client_name << ".\n";
+		}
+		else {
+			std::cout << "\nYou already have a shared symmetric key with " << dest_client_name << ".\n";
+			return;
+		}
 	}
 	else if (operation_code == ProtocolConstants::Input_Codes::SEND_SYMMETRIC_KEY) {
-		if (handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key_requested == true) {
-			// Generating a symmetric key (if there isn't one)
-			if (!(handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) {
-				unsigned char symmetric_key[ProtocolConstants::SYMMETRIC_KEY_SIZE] = {};
+		if (!(handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key).has_value()) { // Check if we already have a symmetric key.
+			if (handler.getClient(handler.arrayToStringID(dest_client_id))->symmetric_key_requested == true) { // Check if the other client requested for a symmetric key.
+				// Generating a symmetric key (if there isn't one)
+				unsigned char symmetric_key[ProtocolConstants::SYMMETRIC_KEY_SIZE] = {}; 
 				AESWrapper aes(AESWrapper::GenerateKey(symmetric_key, ProtocolConstants::SYMMETRIC_KEY_SIZE), ProtocolConstants::SYMMETRIC_KEY_SIZE);
 
 				// Encrypting the symmetric key using the destination client's public key
@@ -1281,18 +1288,18 @@ void handleMessageSend(int operation_code, std::unique_ptr<BaseRequest>& request
 					std::cout << "\nYour shared symmetric key was sent to " << dest_client_name << ".\n";
 				}
 				else {
-					std::cout << "\nYou must send a request for " << dest_client_name << "\'s public key before attempting to send them a symmetric key.\n";
+					std::cout << "\nYou need to request " << dest_client_name << "\'s public key before trying to send them a symmetric key.\n";
 					return;
 				}
 			}
 			else {
-				std::cout << "\nYou already have a shared symmetric key with " << dest_client_name <<".\n";
+				std::cout << "\nYou can't send a symmetric key to \"" << dest_client_name << "\" until they request one from you.\n";
+				std::cout << "However, you can send them a request for a symmetric key.\n";
 				return;
 			}
 		}
 		else {
-			std::cout << "\nYou can't send a symmetric key to \"" << dest_client_name << "\" until they request one from you.\n";
-			std::cout << "However, you can send them a request for a symmetric key.\n";
+			std::cout << "\nYou already have a shared symmetric key with " << dest_client_name << ".\n";
 			return;
 		}
 	}
@@ -1466,7 +1473,7 @@ int main() {
 				}
 			}
 			else { //Non numberical input, clear the input stream!
-				std::cout << "Non-numerical input detected. Please enter one of the valid options.\n";
+				std::cout << "\nNon-numerical input detected. Please enter one of the valid options.\n";
 				cin.clear();
 				cin.ignore(numeric_limits<streamsize>::max(), '\n');
 			}
