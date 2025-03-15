@@ -16,8 +16,8 @@
  - Make sure to visit Server and Client's Running / Compiling subsection for a detailed explanation on compilation and running settings.
 # Server (Python)
 ## General Information
- - The server is a stateless server. Each request is handled individually, with no request relying on data from an earlier session data between requests.
- - The server is multi-client, by using selector module, and is non-blocking.
+ - The server is a stateless server. Each request is handled individually, with no request relying on data from an earlier session data between requests
+ - The server is multi-client, by using selector module, and is non-blocking
  - The server's version is 2, and it's working with an SQLite 3 database to store clients and messages
 ## Server Requirements
  - Python 3.12 and above is required
@@ -32,15 +32,15 @@
  4. The server will begin listening on the port read from myport.info, and it's assigned IP address (defined in the code) for new connections
 ## Server Files
 ### 1. server.py - contains:
-  - main() function - calls the __init__ of a Server class, and then runs it.
-  - Server class - creates a Server instance, reads the port number from the myport.info file (optional, defaults to 1357 if n\a) and then starts a non-blocking, selector driven server, and waits for user connections.
-  - ClientManager class - creates an instance of a client, which receives the client request using the socket, parses it using the Request and Message class, and then sending a response back using the Response class.
-  - Request class - parses the incoming request, and validates that it has exact, expected data.
-  - Message class - a subset of the Request class, parses the incoming request of type message.
-  - Response class - generates a response and sends it back to the user.
-  - Database class - Created on the first run of the server, and holds 2 tables - Clients and Messages. The clients table holds all of the registered clients and their required information. The messages table holds the messages sent between clients, and they're deleted once they've been sent to the other client.
+  - main() function - calls the __init__ of a Server class, and then runs it
+  - Server class - creates a Server instance, reads the port number from the myport.info file (optional, defaults to 1357 if n\a). It then starts a server with the host being '127.0.0.1' (can change it in the Server class constants at the top). It then then starts a non-blocking, selector driven server, and waits for user connections. When a user connects, it create a ClientManager instance for him and handles all of the other logic.
+  - ClientManager class - creates an instance of a client, which receives the client request using the socket connection, parses it using the Request and Message class, and then sending a response back using the Response class
+  - Request class - parses the incoming request, and validates that it has exact data according to the protocol definition. If the request is of type "message" (603), we also use a Message subclass instance
+  - Message class - a subset of the Request class, parses the incoming request of type message, destined to another client
+  - Response class - generates a response and sends it back to the user
+  - Database class - Created on the first run of the server, and holds 2 tables - Clients and Messages. The clients table holds all of the registered clients and their required information. The messages table holds the messages sent between clients, and they're deleted once they've been sent to the other client
 ### 2. myport.info:
-  - Contains the port number for use in the Server class initialization. If invalid / doesn't exist - the server will default to port 1357.
+  - Contains the port number for use in the Server class initialization. If invalid / doesn't exist - the server will default to port 1357
 
 # Client (C++)
 ## General Information
@@ -162,13 +162,13 @@
  3. The protcol structure is available in the official course book.
 
 # Encryption
- - Asymmetric: RSA-1024.
- - Symmetric: AES-CBC with a 128-bit key.
+ - Asymmetric: RSA-1024
+ - Symmetric: AES-CBC with a 128-bit key
    - The IV can be assumed zeroed for this exercise.
- - Uses Crypto++ with course-provided wrappers to handle both RSA and AES encryption and decryption.
- - Public keys are 160 bytes in the protocol, typically including any required header data (like X.509 structures).
- - Private keys are 128 bytes in the protocol, and are encoded and decoded to and from base64 for storage.
- - Symmetric keys are 16 bytes in the protocol, and are transferred from client A to client B after encrypting them with the public key of client B.
+ - Uses Crypto++ with course-provided wrappers to handle both RSA and AES encryption and decryption
+ - Public keys are 160 bytes in the protocol, typically including any required header data (like X.509 structures)
+ - Private keys are 128 bytes in the protocol, and are encoded and decoded to and from base64 for storage
+ - Symmetric keys are 16 bytes in the protocol, and are transferred from client A to client B after encrypting them with the public key of client B (AES encrypted using RSA)
 
 # Author
 Omri Peretz
