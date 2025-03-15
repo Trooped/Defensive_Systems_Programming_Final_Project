@@ -475,25 +475,39 @@ std::string ServerConnectionManager::readPortfromFile(const std::string& line) {
 
 // Validate the server.info file
 std::string ServerConnectionManager::validate_server_file(std::ifstream& file) {
-	std::string line;
-	if (!std::getline(file, line) || file.peek() != EOF) {  // Ensure only 1 line exists
-		throw std::runtime_error("Invalid or too many lines in server.info file");
+	try {
+		std::string line;
+		if (!std::getline(file, line) || file.peek() != EOF) {  // Ensure only 1 line exists
+			throw std::runtime_error("Invalid or too many lines in server.info file");
+		}
+
+		// Split by ':'
+		size_t separator = line.find(':');
+		if (separator == std::string::npos) {
+			throw std::runtime_error("no ':' found in server.info file");
+		}
+
+		std::string tmp_ip = line.substr(0, separator);
+		std::string tmp_port = line.substr(separator + 1);
+
+		bool ipValid = ServerConnectionManager::isIPvalid(tmp_ip);
+		bool portValid = ServerConnectionManager::isPortValid(tmp_port);
+
+		if (!ipValid && !portValid) {
+			throw std::runtime_error("Invalid IP and Port in server.info file");
+		}
+		if (!ipValid) {
+			throw std::runtime_error("Invalid IP in server.info file: " + tmp_ip);
+		}
+		else if (!portValid) {
+			throw std::runtime_error("Invalid port in server.info file: " + tmp_port);
+		}
+
+		return line;
 	}
-
-	// Split by ':'
-	size_t separator = line.find(':');
-	if (separator == std::string::npos) {
-		throw std::runtime_error("no ':' found in server.info file");
+	catch (const std::exception& e) {
+		throw std::runtime_error("While validating server.info file -> " + std::string(e.what()));
 	}
-
-	std::string tmp_ip = line.substr(0, separator);
-	std::string tmp_port = line.substr(separator + 1);
-
-	if (!ServerConnectionManager::isIPvalid(tmp_ip) || !ServerConnectionManager::isPortValid(tmp_port)) {
-		throw std::runtime_error("Invalid IP or Port in server.info file");
-	}
-
-	return line;
 }
 
 // Connects to the server and returns a smart pointer to the socket.
@@ -1454,8 +1468,8 @@ void handleUserInput(int operation_code, ServerConnectionManager& serverConnecti
 
 /* Main Function - main loop*/
 int main() {
-	ServerConnectionManager serverConnection;
 	try {
+		ServerConnectionManager serverConnection;
 		while (true) {
 			int responseCode;
 			std::cout << "MessageU client at your service.\n" << endl;
@@ -1481,7 +1495,8 @@ int main() {
 		}
 	}
 	catch (const std::exception& e) {
-		std::cerr << "Client Error: " << e.what() << "\n";
+		std::cerr << "Client Error: " << e.what() << "\nAborting client...\n";
+		std::exit(EXIT_FAILURE);
 	}
 	return 0;
 }
