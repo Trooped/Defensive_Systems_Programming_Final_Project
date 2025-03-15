@@ -176,6 +176,7 @@ class Server:
     PORT_FILE_NAME = "myport.info"
     MAX_CONNECTIONS = 100
 
+    # The IP address chosen, can change it here and also for the client in the "server.info" file if needed.
     IP_ADDRESS = '127.0.0.1'
 
     def __init__(self):
@@ -1084,8 +1085,12 @@ class Database:
             cursor.execute(
                 f"DELETE FROM {self.MESSAGES_TABLE_NAME} WHERE to_client = ?;", (to_client_id,)
             )
+            deleted_count = cursor.rowcount  # Get the number of deleted messages
             self.connection.commit()
-            print(f"Deleted all messages for client '{self.get_username_by_uuid(to_client_id)}'.")
+            if deleted_count > 0:
+                print(f"Deleted {deleted_count} message(s) for client '{self.get_username_by_uuid(to_client_id)}'.")
+            else:
+                print(f"There were no messages for client '{self.get_username_by_uuid(to_client_id)}.")
         except Exception as e:
             print(f"ERROR: Failed to delete messages for to_client ID '{to_client_id}': {e}")
         finally:
