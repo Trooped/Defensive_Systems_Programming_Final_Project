@@ -177,7 +177,8 @@ class Server:
     PORT_FILE_NAME = "myport.info"
     MAX_CONNECTIONS = 100
 
-    # The IP address chosen, can change it here and also for the client in the "server.info" file if needed.
+    # The IP address chosen (which is localhost).
+    # Can change it here and also for the client in the "server.info" file if needed.
     IP_ADDRESS = '127.0.0.1'
 
     def __init__(self):

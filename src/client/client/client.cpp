@@ -549,7 +549,7 @@ std::string createRandomFileName() {
 	std::random_device rd;
 	std::mt19937 gen(rd());
 
-	// Randomize File Name Length (Between 8 and 32 characters)
+	// Randomize File Name Length (Between 16 and 32 characters)
 	std::uniform_int_distribution<> lengthDist(ProtocolConstants::MIN_RANDOM_FILENAME_LENGTH, ProtocolConstants::MAX_RANDOM_FILENAME_LENGTH);
 	size_t fileNameLength = lengthDist(gen);
 
@@ -1070,7 +1070,7 @@ std::unique_ptr<BaseResponse> parseResponse(std::shared_ptr<tcp::socket>& socket
 							std::string file_content_string(message_content.begin(), message_content.end());
 							std::string decrypted_file_content = aes.decrypt(file_content_string.c_str(), file_content_string.length());
 
-							// Finding %TMP% folder, creating a random file name(NO extension, since it wasn't specified) with a random length between 8-32 chars.
+							// Finding %TMP% folder, creating a random file name(NO extension, since it wasn't specified) with a random length between 16-32 chars.
 							// Then - creating the full path.
 							std::filesystem::path temp_folder_path = std::filesystem::temp_directory_path();
 							std::string random_file_name = createRandomFileName();
