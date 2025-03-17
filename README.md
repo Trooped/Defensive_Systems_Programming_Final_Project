@@ -18,6 +18,7 @@
 ## General Information
  - The server is a stateless server. Each request is handled individually, with no request relying on data from an earlier session data between requests
  - The server is multi-client, by using selector module, and is non-blocking
+ - The server will run on default on LOCALHOST - 127.0.0.1 (can modify it in the HOST constant in the Server class) and the port will be read from the "myport.info" file.
  - The server's version is 2, and it's working with an SQLite 3 database to store clients and messages
 ## Server Requirements
  - Python 3.12 and above is required
@@ -33,7 +34,7 @@
 ## Server Files
 ### 1. server.py - contains:
   - main() function - calls the __init__ of a Server class, and then runs it
-  - Server class - creates a Server instance, reads the port number from the myport.info file (optional, defaults to 1357 if n\a). It then starts a server with the host being '127.0.0.1' (can change it in the Server class constants at the top). It then then starts a non-blocking, selector driven server, and waits for user connections. When a user connects, it create a ClientManager instance for him and handles all of the other logic.
+  - Server class - creates a Server instance, reads the port number from the myport.info file (optional, defaults to 1357 if n\a). It then starts a server with the host being '127.0.0.1' (can change it in the Server class constants at the top). It then then starts a non-blocking, selector driven server, and waits for user connections. When a user connects, it create a ClientManager instance for him and handles all of the other logic. The server connections are based on Python's Socket library.
   - ClientManager class - creates an instance of a client, which receives the client request using the socket connection, parses it using the Request and Message class, and then sending a response back using the Response class
   - Request class - parses the incoming request, and validates that it has exact data according to the protocol definition. If the request is of type "message" (603), we also use a Message subclass instance
   - Message class - a subset of the Request class, parses the incoming request of type message, destined to another client
@@ -49,7 +50,8 @@
   - The client supports encrypted text message and file transmission (up to almost 4GB for each message sent).
   - The client's version is 2, since it supports file transmission.
   - The client contains a main loop to accept information and requests from the user.
-  - The client will stop the user from not following the protocol, and will require him to make certain requests before others.
+  - The client will read it's IP and PORT for the server connection from the "server.info" file.
+  - The client will prevent the user from not following the protocol, and will require him to make certain requests before others.
 ## Client requirements
   - C++17 is required for the client program
   - Crypto++ version 8.80 and earlier
@@ -91,7 +93,7 @@
  - BaseResponse class - contains the response attributes, with many inheriting classes. Responsible for organizing the responses after they're fetched and parsed.
  - ClientInfo struct - Contains a client name, public key, symmetric key and a boolean symmetric_key_requested field, for use with the ClientHandler Singleton class.
  - ClientHandler Singleton Class - Has ONE instance used throughout the program, and contains an unordered map of {client ID : ClientInfo struct}. It holds all of the relevant clients' data on memory in during runtime. It contains many functions to add client, get the singleton instance, set the attributes, get the number of clients, and fetch a specific client etc.
- - ServerConnectionManager class - contains ip, port, io_context and a socket shared_ptr. The constructor reads the server.info file and validates it, and grabs the ip and port. Then, there's a connectToServer() function which of course - creates a socket with the server and returns it.
+ - ServerConnectionManager class - contains ip, port, io_context and a socket shared_ptr. The constructor reads the server.info file and validates it, and grabs the ip and port. Then, there's a connectToServer() function which of course - creates a socket with the server and returns it. The connection is based on Boost/asio library for C++.
  - Wrapper classes for the cryptoPP library, provided by the course staff.
 ### 2. Client.hpp:
  - Contains many constants (inside ProtocolConstants namespace) and includes in the top of the file.
