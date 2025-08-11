@@ -1,4 +1,5 @@
 # MessageU - Encrypted Message Transmission System
+![Grade](https://img.shields.io/badge/Grade-100%2F100-brightgreen)
 # 📃Table of Contents📃
 - [Introduction](#introduction)
 - [Server](#server-python)
